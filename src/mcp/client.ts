@@ -102,7 +102,7 @@ export async function connectMcpServers(
               name: t.name,
               arguments: (args ?? {}) as Record<string, unknown>,
             });
-            return truncate(JSON.stringify(result.content ?? result, null, 2));
+            return truncate(JSON.stringify(result.content ?? result, null, 2), ctx?.maxOutputChars);
           },
         });
       }

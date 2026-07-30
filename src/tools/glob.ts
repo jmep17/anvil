@@ -26,7 +26,7 @@ export function createGlobTool(ctx: ToolContext) {
       });
       const filtered = matches.filter((m) => !ig.ignores(m)).slice(0, 200);
       if (filtered.length === 0) return "No files matched.";
-      return truncate(filtered.join("\n"));
+      return truncate(filtered.join("\n"), ctx.maxOutputChars);
     },
   });
 }

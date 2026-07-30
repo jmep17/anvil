@@ -16,7 +16,7 @@ import {
   type ToolContext,
 } from "../tools/index.ts";
 import { createPlanHarnessTools } from "../tools/plan.ts";
-import type { PermissionDecision } from "../tools/types.ts";
+import { toolOutputBudget, type PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
 import { describeNow } from "./datetime.ts";
 import { nextStepInstructions } from "./discipline.ts";
@@ -153,6 +153,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     alwaysAllowed,
     askPermission: opts.askPermission,
     abortSignal: opts.abortSignal,
+    maxOutputChars: toolOutputBudget(opts.config.contextLength),
     emit: opts.onEvent,
     todos,
     listSkills: () => listSkills(opts.cwd),

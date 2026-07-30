@@ -39,6 +39,12 @@ export interface ToolContext {
     preview?: string,
   ) => Promise<PermissionDecision>;
   abortSignal?: AbortSignal;
+  /**
+   * Characters a single tool result may contribute. Derived from the model's
+   * context window: a fixed cap that is generous for a 64k window swallows
+   * most of a 16k one, and every later step then pays for it.
+   */
+  maxOutputChars?: number;
   emit?: (event: AgentEvent) => void;
   todos: TodoItem[];
   runSubagent: (prompt: string, toolNames?: string[]) => Promise<string>;
@@ -47,6 +53,19 @@ export interface ToolContext {
 }
 
 export const MAX_TOOL_OUTPUT = 50_000;
+
+/** Share of the context window one tool result may occupy. */
+const TOOL_OUTPUT_SHARE = 0.25;
+/** Below this a result is too small to be useful, whatever the window. */
+const MIN_TOOL_OUTPUT = 8_000;
+
+/** Characters a tool may return, given the configured context length. */
+export function toolOutputBudget(contextLength: number): number {
+  if (!Number.isFinite(contextLength) || contextLength <= 0) return MAX_TOOL_OUTPUT;
+  // ~4 characters per token, matching the estimator used for compaction.
+  const chars = Math.floor(contextLength * 4 * TOOL_OUTPUT_SHARE);
+  return Math.min(MAX_TOOL_OUTPUT, Math.max(MIN_TOOL_OUTPUT, chars));
+}
 
 export function truncate(text: string, max = MAX_TOOL_OUTPUT): string {
   if (text.length <= max) return text;

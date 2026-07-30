@@ -50,12 +50,12 @@ export function createWebFetchTool(ctx: ToolContext) {
         const ctype = res.headers.get("content-type") ?? "";
         const body = await res.text();
         if (ctype.includes("application/json")) {
-          return truncate(body);
+          return truncate(body, ctx.maxOutputChars);
         }
         if (ctype.includes("text/plain") || ctype.includes("text/markdown")) {
-          return truncate(body);
+          return truncate(body, ctx.maxOutputChars);
         }
-        return truncate(htmlToText(body));
+        return truncate(htmlToText(body), ctx.maxOutputChars);
       } catch (err) {
         return `Error fetching ${url}: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -108,6 +108,7 @@ export function createWebSearchTool(ctx: ToolContext) {
         if (results.length === 0) {
           return truncate(
             `No structured results parsed. Raw excerpt:\n${htmlToText(html).slice(0, 2000)}`,
+            ctx.maxOutputChars,
           );
         }
         return results

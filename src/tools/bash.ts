@@ -96,7 +96,7 @@ export function createBashTool(ctx: ToolContext) {
           stdout ? `stdout:\n${stdout}` : "stdout: (empty)",
           stderr ? `stderr:\n${stderr}` : null,
         ].filter(Boolean);
-        return truncate(parts.join("\n\n"));
+        return truncate(parts.join("\n\n"), ctx.maxOutputChars);
       } finally {
         clearTimeout(timer);
         ctx.abortSignal?.removeEventListener("abort", onAbort);

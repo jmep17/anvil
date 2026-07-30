@@ -90,11 +90,11 @@ export function createGrepTool(ctx: ToolContext) {
       await proc.exited;
       if (proc.exitCode === 1 && !stdout) return "No matches found.";
       if (proc.exitCode !== 0 && proc.exitCode !== 1) {
-        return truncate(`Error: ${stderr || stdout}`);
+        return truncate(`Error: ${stderr || stdout}`, ctx.maxOutputChars);
       }
       const limit = head_limit ?? 100;
       const lines = stdout.split("\n").filter(Boolean).slice(0, limit);
-      return truncate(lines.join("\n") || "No matches found.");
+      return truncate(lines.join("\n") || "No matches found.", ctx.maxOutputChars);
     },
   });
 }
