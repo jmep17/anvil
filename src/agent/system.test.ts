@@ -55,8 +55,7 @@ describe("buildSystemPrompt", () => {
       skillsConfig: { ...DEFAULT_SKILLS_CONFIG },
     });
     expect(prompt).toContain("read-only");
-    expect(prompt).toContain("load recommended or relevant skills");
-    expect(prompt).toContain("wait for the user to approve the plan");
+    expect(prompt).toContain("PlanRoute → repository search → file read → SubmitPlan");
     expect(prompt).toContain("Loaded skills (always/auto)");
     expect(prompt).toContain("### Skill: docs");
   });

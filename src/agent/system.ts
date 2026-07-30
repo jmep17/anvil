@@ -38,7 +38,7 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
 
   const planNudge =
     opts.mode === "plan"
-      ? "\n- In plan mode: before proposing an implementation plan, load recommended or relevant skills with the Skill tool. End with a self-contained plan covering the files to change, implementation steps, verification, and material risks. Do not claim implementation has started; wait for the user to approve the plan."
+      ? "\n- In plan mode, follow the enforced PlanRoute → repository search → file read → SubmitPlan workflow. Never present prose as a plan. PlanRoute may ask one concise clarification only for a decision-critical missing requirement. SubmitPlan is the only way to send a plan for approval."
       : "";
 
   const injected =

@@ -13,6 +13,7 @@ import type { ModelMessage } from "ai";
 import { compactMessages } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
+import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
 import type { AgentMode, AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
@@ -62,7 +63,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     resolve: (d: PermissionDecision) => void;
   } | null>(null);
   const [planReview, setPlanReview] = useState<{
-    plan: string;
+    plan: ReviewedPlan;
     phase: "ready" | "denying";
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -139,14 +140,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     [recordTimeline],
   );
 
-  const flushLive = useCallback((kind: "assistant" | "plan" = "assistant") => {
+  const flushLive = useCallback((kind: "assistant" | "plan" = "assistant", includeText = true) => {
     cancelLiveRender();
     const thinkingText = thinkingAccRef.current.trim();
     if (thinkingText) {
       push({ kind: "thinking", id: nextId("th"), text: thinkingText }, false);
     }
     const assistantText = streamingAccRef.current;
-    if (assistantText.trim()) {
+    if (includeText && assistantText.trim()) {
       push({ kind, id: nextId(kind === "plan" ? "p" : "a"), text: assistantText });
     }
     thinkingAccRef.current = "";
@@ -282,7 +283,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       streamingAccRef.current = "";
       const { displayText, modelText } = await expandFileMentions(text, cwd);
       const request = revisingPlan
-        ? `The previous implementation plan was declined. Revise it in response to this feedback:\n${modelText}`
+        ? `The previous implementation plan was declined. Revise this structured plan in response to the feedback:\n\n${formatReviewedPlan(planReview!.plan)}\n\nFeedback:\n${modelText}`
         : modelText;
       if (revisingPlan) setPlanReview(null);
       push({
@@ -350,17 +351,20 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         const added = result.messages.slice(before + 1);
         for (const m of added) await session.appendMessage(m);
         messagesRef.current = result.messages;
-        const isPlan = configRef.current.mode === "plan";
-        flushLive(isPlan ? "plan" : "assistant");
-        if (!streamedAny && result.text?.trim()) {
+        const isPlanMode = configRef.current.mode === "plan";
+        flushLive("assistant", !isPlanMode);
+        if (isPlanMode && result.plan) {
+          const planText = formatReviewedPlan(result.plan);
+          push({ kind: "plan", id: nextId("p"), text: planText });
+          setPlanReview({ plan: result.plan, phase: "ready" });
+        } else if (isPlanMode && result.clarification) {
+          push({ kind: "clarification", id: nextId("q"), text: result.clarification.question });
+        } else if (!isPlanMode && !streamedAny && result.text?.trim()) {
           push({
-            kind: isPlan ? "plan" : "assistant",
-            id: nextId(isPlan ? "p" : "a"),
+            kind: "assistant",
+            id: nextId("a"),
             text: result.text,
           });
-        }
-        if (isPlan && result.text?.trim()) {
-          setPlanReview({ plan: result.text, phase: "ready" });
         }
         for (const h of result.mcpHandles) await h.close().catch(() => {});
       } catch (err) {
@@ -414,7 +418,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     setPlanReview(null);
     applyMode("build");
     push({ kind: "status", id: nextId("s"), text: "plan approved · starting implementation" });
-    void submit("Implement the approved plan above. Make the changes now, verify them, and report the results.");
+    void submit(
+      `Implement the approved plan below. Make the changes now, verify them, and report the results.\n\n${formatReviewedPlan(planReview.plan)}`,
+    );
   }, [applyMode, planReview, push, submit]);
 
   useEffect(() => {

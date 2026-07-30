@@ -17,6 +17,7 @@ type Tone =
   | "user"
   | "assistant"
   | "plan"
+  | "clarification"
   | "thinking"
   | "tool-running"
   | "tool-done"
@@ -34,6 +35,7 @@ const TONE_FG: Record<Tone, string | undefined> = {
   user: colors.cyan,
   assistant: colors.text,
   plan: colors.green,
+  clarification: colors.yellow,
   thinking: colors.gray,
   "tool-running": colors.yellow,
   "tool-done": colors.green,
@@ -103,6 +105,11 @@ function appendItem(lines: DisplayLine[], item: TimelineItem, width: number): vo
       lines.push({ key: `${item.id}-title`, text: "╭─ ✓ plan for review", tone: "plan" });
       appendWrapped(lines, item.id, item.text, "plan", width);
       lines.push({ key: `${item.id}-end`, text: "╰─", tone: "plan" });
+      return;
+    case "clarification":
+      lines.push({ key: `${item.id}-title`, text: "╭─ ? clarification needed", tone: "clarification" });
+      appendWrapped(lines, item.id, item.text, "clarification", width);
+      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "clarification" });
       return;
     case "thinking":
       lines.push({ key: `${item.id}-title`, text: "╭─ thinking", tone: "thinking" });
@@ -347,6 +354,8 @@ const TimelineItemView = memo(function TimelineItemView({
       return <AssistantMarkdown text={item.text} />;
     case "plan":
       return <AssistantMarkdown text={item.text} title="✓ PLAN FOR REVIEW" borderColor={colors.green} />;
+    case "clarification":
+      return <PlainBlock title="? CLARIFICATION NEEDED" body={item.text} tone="clarification" width={width} />;
     case "thinking":
       return <PlainBlock title="THINKING" body={item.text} tone="thinking" width={width} />;
     case "tool":

@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import { compactMessages } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
+import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
 import type { AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent } from "../tools/index.ts";
@@ -69,7 +70,7 @@ export async function runRepl(opts: {
   const ask = opts.yes ? allowAll : askPermissionCli;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  const reviewPlan = async (): Promise<void> => {
+  const reviewPlan = async (plan: ReviewedPlan): Promise<void> => {
     if (opts.prompt) {
       console.log("Plan ready for review. Run Anvil interactively to approve and implement it.");
       return;
@@ -82,7 +83,9 @@ export async function runRepl(opts: {
       if (answer === "a" || answer === "approve") {
         opts.config.mode = "build";
         console.log("plan approved · mode → build");
-        await runTurn("Implement the approved plan above. Make the changes now, verify them, and report the results.");
+        await runTurn(
+          `Implement the approved plan below. Make the changes now, verify them, and report the results.\n\n${formatReviewedPlan(plan)}`,
+        );
         return;
       }
       if (answer === "d" || answer === "deny" || answer === "decline") {
@@ -115,7 +118,7 @@ export async function runRepl(opts: {
     process.once("SIGINT", onSigInt);
 
     let streamed = false;
-    let planText = "";
+    let reviewedPlan: ReviewedPlan | undefined;
     try {
       const result = await runAgent({
         config: opts.config,
@@ -131,13 +134,17 @@ export async function runRepl(opts: {
       const added = result.messages.slice(before + 1);
       for (const m of added) await opts.session.appendMessage(m);
       messages = result.messages;
-      if (opts.config.mode === "plan") planText = result.text.trim();
-      if (result.text?.trim() && !streamed) {
+      reviewedPlan = result.plan;
+      if (opts.config.mode === "plan" && result.plan) {
+        process.stdout.write(`${formatReviewedPlan(result.plan)}\n`);
+      } else if (opts.config.mode === "plan" && result.clarification) {
+        process.stdout.write(`Clarification needed: ${result.clarification.question}\n`);
+      } else if (result.text?.trim() && !streamed) {
         process.stdout.write(result.text);
       }
       process.stdout.write("\n\n");
       for (const h of result.mcpHandles) await h.close().catch(() => {});
-      if (planText) await reviewPlan();
+      if (reviewedPlan) await reviewPlan(reviewedPlan);
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
     } finally {

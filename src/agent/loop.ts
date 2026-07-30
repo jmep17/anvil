@@ -15,10 +15,17 @@ import {
   type TodoItem,
   type ToolContext,
 } from "../tools/index.ts";
+import { createPlanHarnessTools } from "../tools/plan.ts";
 import type { PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
 import { nextStepInstructions } from "./discipline.ts";
 import { createModel } from "./model.ts";
+import {
+  PlanHarness,
+  planHarnessTools,
+  type PlanClarification,
+  type ReviewedPlan,
+} from "./planHarness.ts";
 import { shouldPauseReadTool } from "./stall.ts";
 import { buildSystemPrompt } from "./system.ts";
 
@@ -39,6 +46,8 @@ export interface RunAgentResult {
   messages: ModelMessage[];
   text: string;
   mcpHandles: McpHandle[];
+  plan?: ReviewedPlan;
+  clarification?: PlanClarification;
 }
 
 function pickTools(all: ToolSet, allowlist?: string[]): ToolSet {
@@ -71,6 +80,7 @@ async function resolveInjectedSkills(
 
 export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const depth = opts.depth ?? 0;
+  const planHarness = opts.config.mode === "plan" && depth === 0 ? new PlanHarness() : undefined;
   const alwaysAllowed = new Set<string>();
   const todos: TodoItem[] = [];
   const skills = await listSkills(opts.cwd);
@@ -137,6 +147,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const tools: ToolSet = {
     ...createBuiltinTools(ctx, opts.toolAllowlist),
     ...pickTools(mcpTools, opts.toolAllowlist),
+    ...(planHarness ? createPlanHarnessTools(planHarness) : {}),
   };
 
   const system = buildSystemPrompt({
@@ -165,9 +176,20 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     messages,
     tools,
     abortSignal: opts.abortSignal,
-    stopWhen: isStepCount(opts.config.maxSteps),
+    stopWhen: planHarness
+      ? [isStepCount(opts.config.maxSteps), () => planHarness.isComplete]
+      : isStepCount(opts.config.maxSteps),
     maxRetries: 2,
     prepareStep: ({ steps }) => {
+      const planControl = planHarness?.nextStep();
+      if (planControl) {
+        opts.onEvent?.({ type: "status", message: `plan · ${planControl.stage.replace(/_/g, " ")}` });
+        return {
+          activeTools: planHarnessTools(tools, planControl),
+          toolChoice: planControl.toolChoice,
+          instructions: `${system}\n\nPlan harness stage: ${planControl.instruction}`,
+        };
+      }
       const pauseRead = shouldPauseReadTool(steps);
       const instructions = nextStepInstructions(
         system,
@@ -225,6 +247,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         });
         return;
       }
+      planHarness?.recordEvidence(toolCall.toolName, toolCall.input);
       const output =
         typeof toolOutput.output === "string"
           ? toolOutput.output
@@ -239,7 +262,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     },
     onStepFinish: async ({ text, toolCalls }) => {
       step += 1;
-      if (toolCalls.length === 0 && text) {
+      if (!planHarness && toolCalls.length === 0 && text) {
         opts.onEvent?.({ type: "text", text });
       }
       opts.onEvent?.({ type: "step", step });
@@ -253,5 +276,18 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   // Ensure callers always get the assembled assistant text even if chunk streaming was sparse
   opts.onEvent?.({ type: "status", message: `done (${step} step(s))` });
 
-  return { messages: nextMessages, text: finalText, mcpHandles };
+  if (planHarness && !planHarness.isComplete) {
+    opts.onEvent?.({
+      type: "error",
+      message: "Plan harness ended before a clarification or structured plan was submitted.",
+    });
+  }
+
+  return {
+    messages: nextMessages,
+    text: finalText,
+    mcpHandles,
+    plan: planHarness?.reviewedPlan,
+    clarification: planHarness?.clarification,
+  };
 }

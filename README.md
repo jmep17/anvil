@@ -50,7 +50,7 @@ bun run anvil -- -p -y "list files and summarize README.md"
 ## Modes
 
 - **build** (default): full tools with permission prompts for Write/Edit/Bash
-- **plan**: read-only (no Write/Edit/Bash) — `/mode plan`. Anvil presents the resulting plan as **PLAN FOR REVIEW** and waits for a decision: approve to switch to build mode and implement it, or decline and provide feedback for a revised plan.
+- **plan**: read-only (no Write/Edit/Bash) — `/mode plan`. Anvil first classifies the request, then gathers a repository search result and direct file evidence before it can submit a structured **PLAN FOR REVIEW**. If a decision-critical detail is missing, it asks one clarification instead. Approve switches to build mode and implements the validated plan; decline requests a revision.
 
 Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal alternate screen (fullscreen).
 

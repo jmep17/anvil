@@ -4,6 +4,7 @@ export type TimelineItem =
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "plan"; id: string; text: string }
+  | { kind: "clarification"; id: string; text: string }
   | { kind: "thinking"; id: string; text: string }
   | {
       kind: "tool";
