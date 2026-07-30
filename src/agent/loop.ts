@@ -19,7 +19,7 @@ import { createPlanHarnessTools } from "../tools/plan.ts";
 import { toolOutputBudget, type PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
 import { describeNow } from "./datetime.ts";
-import { nextStepInstructions } from "./discipline.ts";
+import { nextStepNudge, withNudge } from "./discipline.ts";
 import { createModel } from "./model.ts";
 import {
   PlanHarness,
@@ -229,22 +229,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       ? [isStepCount(opts.config.maxSteps), () => planHarness.isComplete]
       : isStepCount(opts.config.maxSteps),
     maxRetries: 2,
-    // `instructions` overrides carry forward to later steps (see the AI SDK's
-    // PrepareStepResult docs), so every branch must state the instructions it
-    // wants in full. Returning undefined would leave the previous step's
-    // override — a stale plan stage or discipline checkpoint — welded on.
-    prepareStep: ({ steps }) => {
+    // The system prompt is never rewritten between steps. It is the prompt
+    // prefix, and a local server caches its KV state; changing it forces the
+    // whole context to be re-encoded before each step, which is felt as the
+    // agent hanging. Per-step guidance is appended to the messages instead,
+    // where it only costs the new tokens.
+    prepareStep: ({ steps, messages: stepMessages }) => {
       const planControl = planHarness?.nextStep();
       if (planControl) {
         opts.onEvent?.({ type: "status", message: `plan · ${planControl.stage.replace(/_/g, " ")}` });
         return {
           activeTools: planHarnessTools(tools, planControl),
-          instructions: `${system}\n\nPlan harness stage: ${planControl.instruction}`,
+          messages: withNudge(stepMessages, `Plan harness stage: ${planControl.instruction}`),
         };
       }
       const pauseRead = shouldPauseReadTool(steps);
-      const instructions =
-        nextStepInstructions(system, Boolean(steps.at(-1)?.toolCalls.length)) ?? system;
+      const nudge = nextStepNudge(Boolean(steps.at(-1)?.toolCalls.length));
 
       if (pauseRead) {
         opts.onEvent?.({
@@ -253,7 +253,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         });
       }
       return {
-        instructions,
+        ...(nudge ? { messages: withNudge(stepMessages, nudge) } : {}),
         ...(pauseRead ? { activeTools: Object.keys(tools).filter((name) => name !== "Read") } : {}),
       };
     },
