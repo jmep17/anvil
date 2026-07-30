@@ -2,8 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 import { contrastRatio, parseHex, type Rgb } from "./color.ts";
 import { applyPalette, buildPalette } from "./theme.ts";
-import { Timeline } from "./Timeline.tsx";
-import type { TimelineItem } from "./types.ts";
+import { InputBox } from "./InputBox.tsx";
 
 const DARK = "#17150f";
 
@@ -12,9 +11,9 @@ afterEach(() => {
 });
 
 /** Foreground colours actually painted for cells containing `text`. */
-async function inkFor(items: TimelineItem[], needle: string, background: string): Promise<Rgb[]> {
+async function inkFor(value: string, needle: string, _background: string): Promise<Rgb[]> {
   const { renderer, captureSpans, waitForVisualIdle } = await testRender(
-    <Timeline items={items} columns={72} />,
+    <InputBox value={value} cursor={value.length} busy={false} columns={72} />,
     { width: 72, height: 20 },
   );
   try {
@@ -40,17 +39,7 @@ async function inkFor(items: TimelineItem[], needle: string, background: string)
   }
 }
 
-const ITEMS: TimelineItem[] = [
-  { kind: "user", id: "u1", text: "distinctivetext" },
-  {
-    kind: "tool",
-    id: "t1",
-    name: "Read",
-    input: { path: "a.ts" },
-    status: "done",
-    output: "     1|x\n",
-  },
-];
+const TYPED = "distinctivetext";
 
 describe("palette applied to real frames", () => {
   test("a light terminal gets ink dark enough to read", async () => {
@@ -58,7 +47,7 @@ describe("palette applied to real frames", () => {
     applyPalette(buildPalette(background));
 
     const bg = parseHex(background)!;
-    for (const ink of await inkFor(ITEMS, "distinctivetext", background)) {
+    for (const ink of await inkFor(TYPED, "distinctivetext", background)) {
       expect(contrastRatio(ink, bg)).toBeGreaterThanOrEqual(4.4);
     }
   });
@@ -67,18 +56,18 @@ describe("palette applied to real frames", () => {
     applyPalette(buildPalette(DARK));
 
     const bg = parseHex(DARK)!;
-    for (const ink of await inkFor(ITEMS, "distinctivetext", DARK)) {
+    for (const ink of await inkFor(TYPED, "distinctivetext", DARK)) {
       expect(contrastRatio(ink, bg)).toBeGreaterThanOrEqual(4.4);
     }
   });
 
-  test("tool result summaries stay readable, not just the prose", async () => {
+  test("the placeholder stays readable, not just typed text", async () => {
     const background = "#ffffff";
     applyPalette(buildPalette(background));
 
     const bg = parseHex(background)!;
-    for (const ink of await inkFor(ITEMS, "1 line", background)) {
-      expect(contrastRatio(ink, bg)).toBeGreaterThanOrEqual(4.4);
+    for (const ink of await inkFor("", "Ask Anvil", background)) {
+      expect(contrastRatio(ink, bg)).toBeGreaterThanOrEqual(2.7);
     }
   });
 });

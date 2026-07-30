@@ -56,8 +56,13 @@ bun run anvil -- -p -y "list files and summarize README.md"
   - **clarify** — one question, only when a decision-critical requirement is missing.
 
 Esc (or Ctrl+C) interrupts a running turn in the TUI, killing any command it spawned.
-The interactive TUI uses the terminal alternate screen (fullscreen) and inherits your
-terminal's background rather than painting its own.
+
+The TUI renders inline rather than taking over the screen: the transcript is written
+to the terminal's own scrollback and only the prompt and status line are pinned to a
+reserved region at the bottom. Output starts where your shell prompt was and grows
+downward, your terminal's own scrolling and selection work throughout, and the
+transcript is still there after you quit. Anvil inherits your terminal's background
+rather than painting its own.
 
 ### Date and time
 
@@ -108,10 +113,9 @@ Enter `/` to open a completion menu. The same commands work in the TUI and the R
 | ↑ / ↓ | Recall previous prompts (moves the cursor inside a multi-line draft) |
 | Home / End, Ctrl+A / Ctrl+E | Line start / end |
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
-| Ctrl+O | Expand or collapse tool output |
+| Ctrl+O | Expand or summarize tool output from here on |
 | Esc | Interrupt (busy); dismiss a picker; in Vim insert → normal; otherwise clear input |
 | Ctrl+C | Interrupt while busy; otherwise press twice to exit |
-| PgUp / PgDn | Browse the full transcript; PgDn returns to live output |
 | Shift+Tab | Toggle plan ↔ build (disabled while a plan is awaiting review) |
 | ↑↓ + Enter, or 1 / 2 / 3 | Answer an approval prompt: allow once / don't ask again for this file or command / deny |
 

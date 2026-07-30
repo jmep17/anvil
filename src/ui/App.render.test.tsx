@@ -23,6 +23,15 @@ afterAll(async () => {
   await rm(cwd, { recursive: true, force: true });
 });
 
+/** The app's real renderer shape: pinned footer, transcript in scrollback. */
+const SPLIT = {
+  width: 90,
+  height: 26,
+  screenMode: "split-footer" as const,
+  externalOutputMode: "capture-stdout" as const,
+  footerHeight: 6,
+};
+
 function config() {
   return {
     ...DEFAULT_CONFIG,
@@ -38,30 +47,24 @@ function config() {
 describe("App", () => {
   test("boots with a welcome block, a prompt and a status footer", async () => {
     const session = await SessionStore.create(cwd);
-    const { renderer, waitForFrame, captureCharFrame } = await testRender(
+    const { renderer, externalOutput, waitForFrame, waitForVisualIdle } = await testRender(
       <App config={config()} cwd={cwd} session={session} />,
-      { width: 90, height: 26 },
+      SPLIT,
     );
     try {
-      await waitForFrame((frame) => frame.includes("Welcome to Anvil"), { maxPasses: 200 });
-      const frame = captureCharFrame();
-
-      // Welcome block, shown once in the transcript rather than pinned as chrome.
-      expect(frame).toContain("✻ Welcome to Anvil");
-      expect(frame).toContain("/help for commands");
-      expect(frame).toContain(cwd);
-
-      // Prompt and its placeholder.
-      expect(frame).toContain("Ask Anvil");
-
-      // Footer carries the status that used to occupy a four-row header.
+      // The prompt and status live in the pinned region React owns.
+      const frame = await waitForFrame((f) => f.includes("Ask Anvil"), { maxPasses: 400 });
       expect(frame).toContain("? for shortcuts");
       expect(frame).toContain("build · test-model");
 
-      // The old always-on header is gone.
-      expect(frame).not.toContain("◈ ANVIL");
-      expect(frame).not.toContain("LOCAL AGENT");
-      expect(frame).not.toContain("REQUEST · READY");
+      // The welcome block goes to the terminal's scrollback, above the footer.
+      await waitForVisualIdle();
+      const scrollback = externalOutput.takeText();
+      expect(scrollback).toContain("✻ Welcome to Anvil");
+      expect(scrollback).toContain("/help for commands");
+      expect(scrollback).toContain(cwd);
+      // It is not painted into the pinned region.
+      expect(frame).not.toContain("Welcome to Anvil");
     } finally {
       renderer.destroy();
     }
@@ -69,14 +72,20 @@ describe("App", () => {
 
   test("an unreachable model server is reported in the transcript and the footer", async () => {
     const session = await SessionStore.create(cwd);
-    const { renderer, waitForFrame } = await testRender(
+    const { renderer, externalOutput, waitForFrame, waitForVisualIdle } = await testRender(
       <App config={config()} cwd={cwd} session={session} />,
-      { width: 90, height: 26 },
+      SPLIT,
     );
     try {
-      const frame = await waitForFrame((f) => f.includes("⏺ Error"), { maxPasses: 400 });
-      expect(frame).toContain("Cannot reach");
+      // The footer reports the connection state...
+      const frame = await waitForFrame((f) => f.includes("offline"), { maxPasses: 400 });
       expect(frame).toContain("offline");
+
+      // ...and the failure itself is written to the transcript.
+      await waitForVisualIdle();
+      const scrollback = externalOutput.takeText();
+      expect(scrollback).toContain("⏺ Error");
+      expect(scrollback).toContain("Cannot reach");
     } finally {
       renderer.destroy();
     }

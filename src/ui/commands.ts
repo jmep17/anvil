@@ -61,10 +61,9 @@ const SHORTCUTS: Array<[string, string]> = [
   ["shift+tab", "toggle plan ↔ build mode"],
   ["esc", "interrupt the agent, or clear the prompt"],
   ["ctrl+c", "press twice to exit"],
-  ["ctrl+o", "expand or collapse tool output"],
+  ["ctrl+o", "expand or summarize tool output from here on"],
   ["ctrl+g", "edit the prompt in $EDITOR"],
   ["↑ / ↓", "recall previous prompts"],
-  ["pgup / pgdn", "scroll the transcript"],
 ];
 
 export function helpText(): string {

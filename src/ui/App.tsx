@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  createCliRenderer,
-  type ScrollBoxRenderable,
-} from "@opentui/core";
+import { createCliRenderer } from "@opentui/core";
 import {
   createRoot,
   useKeyboard,
@@ -32,9 +29,8 @@ import {
   permissionContentRows,
   planReviewContentRows,
 } from "./InputBox.tsx";
+import { commitItem, commitItems, commitWelcome } from "./scrollback.ts";
 import { SessionPicker, sessionPickerRows } from "./SessionPicker.tsx";
-import { Timeline } from "./Timeline.tsx";
-import { Welcome, welcomeHeight } from "./Welcome.tsx";
 import { Working, workingHeight } from "./Working.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
@@ -47,6 +43,14 @@ import {
 } from "./theme.ts";
 import { usePromptInput } from "./usePromptInput.ts";
 import { keyChar } from "./keys.ts";
+
+/** Rows of scrollback kept visible above the pinned region. */
+const MIN_TRANSCRIPT_ROWS = 3;
+/** Floor for an approval prompt, so its options are always reachable. */
+const MIN_PERMISSION_ROWS = 10;
+/** Before the first measured layout: prompt box plus the footer rule. */
+const INITIAL_FOOTER_HEIGHT = 5;
+const EXIT_HINT = "press ctrl+c again to exit";
 
 interface Props {
   config: AnvilConfig;
@@ -67,15 +71,12 @@ export function App({
   const [session, setSession] = useState(initialSession);
   const renderer = useRenderer();
   const { width: columns, height: rows } = useTerminalDimensions();
-  const scrollRef = useRef<ScrollBoxRenderable>(null);
   const [config, setConfig] = useState(initialConfig);
   const configRef = useRef(config);
   configRef.current = config;
   const [busy, setBusy] = useState(false);
-  const [items, setItems] = useState<TimelineItem[]>([]);
   const [status, setStatus] = useState("starting…");
   const [serverReady, setServerReady] = useState(false);
-  const [browsingHistory, setBrowsingHistory] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
@@ -92,7 +93,11 @@ export function App({
   const alwaysAllowedRef = useRef(new Set<string>());
   const [pendingChoice, setPendingChoice] = useState(0);
   const [planChoice, setPlanChoice] = useState(0);
+  // Scrollback is append-only, so this governs how future tool rows are
+  // written rather than re-opening ones already on screen.
   const [expandTools, setExpandTools] = useState(false);
+  const expandToolsRef = useRef(expandTools);
+  expandToolsRef.current = expandTools;
   const [startedAt, setStartedAt] = useState(0);
   const [contextUsed, setContextUsed] = useState(0);
   // Recomputed at turn boundaries only: estimateTokens walks the whole
@@ -102,7 +107,6 @@ export function App({
   const queuedRef = useRef<string[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [resumedCount, setResumedCount] = useState(0);
   const [sessionPicker, setSessionPicker] = useState<{
     sessions: SessionSummary[];
     selected: number;
@@ -152,16 +156,34 @@ export function App({
     [renderer],
   );
 
-  const refreshBrowseState = useCallback(() => {
-    const sb = scrollRef.current;
-    if (!sb) {
-      setBrowsingHistory(false);
-      return;
-    }
-    const view = sb.viewport.height;
-    const atBottom = sb.scrollTop + view >= sb.scrollHeight - 1;
-    setBrowsingHistory(!atBottom);
-  }, []);
+  // Scrollback commits are async; this keeps them in the order they were made.
+  const commitQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastCommittedRef = useRef<TimelineItem | undefined>(undefined);
+
+  const commit = useCallback(
+    (item: TimelineItem) => {
+      commitQueueRef.current = commitQueueRef.current
+        .then(() => commitItem(renderer, item, lastCommittedRef.current, expandToolsRef.current))
+        .then(() => {
+          lastCommittedRef.current = item;
+        })
+        .catch(() => {});
+    },
+    [renderer],
+  );
+
+  /** Re-emit a stored transcript into scrollback, in order. */
+  const replayTranscript = useCallback(
+    (transcript: TimelineItem[]) => {
+      commitQueueRef.current = commitQueueRef.current
+        .then(async () => {
+          await commitItems(renderer, transcript, lastCommittedRef.current);
+          lastCommittedRef.current = transcript.at(-1) ?? lastCommittedRef.current;
+        })
+        .catch(() => {});
+    },
+    [renderer],
+  );
 
   const recordTimeline = useCallback(
     (item: TimelineItem) => {
@@ -173,11 +195,10 @@ export function App({
 
   const push = useCallback(
     (item: TimelineItem, persist = true) => {
-      setItems((prev) => [...prev, item]);
-      setBrowsingHistory(false);
+      commit(item);
       if (persist) recordTimeline(item);
     },
-    [recordTimeline],
+    [commit, recordTimeline],
   );
 
   const flushLive = useCallback((kind: "assistant" | "plan" = "assistant", includeText = true) => {
@@ -196,15 +217,14 @@ export function App({
     setStreaming("");
   }, [cancelLiveRender, push]);
 
-  const upsertTool = useCallback((item: Extract<TimelineItem, { kind: "tool" }>) => {
-    setItems((prev) => {
-      const idx = prev.findIndex((x) => x.kind === "tool" && x.id === item.id);
-      if (idx === -1) return [...prev, item];
-      const next = prev.slice();
-      next[idx] = item;
-      return next;
-    });
-  }, []);
+  // Scrollback is append-only, so a tool row is written once, on completion.
+  // The spinner in the pinned footer covers the in-flight state.
+  const completeTool = useCallback(
+    (item: Extract<TimelineItem, { kind: "tool" }>) => {
+      commit(item);
+    },
+    [commit],
+  );
 
   const refreshStatus = useCallback(
     (cfg: AnvilConfig, agentMode: AgentMode) => {
@@ -325,8 +345,16 @@ export function App({
             return;
           case "clear":
             messagesRef.current = [];
-            setItems([]);
-            push({ kind: "status", id: nextId("s"), text: "context cleared" }, false);
+            setContextTokens(0);
+            setContextUsed(0);
+            push(
+              {
+                kind: "status",
+                id: nextId("s"),
+                text: "context cleared (scrollback above is the terminal's)",
+              },
+              false,
+            );
             return;
           case "status":
             push(
@@ -429,13 +457,6 @@ export function App({
         } else if (event.type === "tool_start") {
           flushLive();
           toolInputsRef.current.set(event.id, event.input);
-          upsertTool({
-            kind: "tool",
-            id: event.id,
-            name: event.name,
-            input: event.input,
-            status: "running",
-          });
         } else if (event.type === "tool_end") {
           const nextItem: Extract<TimelineItem, { kind: "tool" }> = {
             kind: "tool",
@@ -447,7 +468,7 @@ export function App({
             ms: event.ms,
           };
           toolInputsRef.current.delete(event.id);
-          upsertTool(nextItem);
+          completeTool(nextItem);
           recordTimeline(nextItem);
         } else if (event.type === "todos") {
           flushLive();
@@ -521,7 +542,7 @@ export function App({
       serverReady,
       scheduleLiveRender,
       session,
-      upsertTool,
+      completeTool,
     ],
   );
 
@@ -565,8 +586,9 @@ export function App({
       messagesRef.current = loaded;
       syncNextId(transcript);
       setSession(store);
-      setItems(transcript);
-      setResumedCount(loaded.length);
+      // Replay the stored transcript into scrollback rather than repainting a
+      // viewport; the terminal keeps it from there on.
+      replayTranscript(transcript);
       setContextTokens(estimateTokens(loaded));
       setContextUsed(estimateTokens(loaded) / Math.max(1, configRef.current.contextLength));
       push(
@@ -593,14 +615,14 @@ export function App({
 
   useEffect(() => {
     (async () => {
+      commitWelcome(renderer, { cwd, model: configRef.current.model });
       const loaded = await session.loadMessages();
       messagesRef.current = loaded;
       const transcript = await session.loadTimeline();
       if (transcript.length > 0) {
         syncNextId(transcript);
-        setItems(transcript);
+        replayTranscript(transcript);
       }
-      if (loaded.length > 0) setResumedCount(loaded.length);
       setContextTokens(estimateTokens(loaded));
       setContextUsed(estimateTokens(loaded) / Math.max(1, config.contextLength));
       const online = await checkConnection(config);
@@ -612,16 +634,29 @@ export function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once on mount
   }, []);
 
-  const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
-  const pasteExtra = prompt.pasteHint ? 1 : 0;
+  // Only the pinned region is measured now. Getting it wrong misplaces the
+  // footer rather than silently squeezing a transcript, so the reservations
+  // below track exactly what InputBox draws.
+  const vimExtra =
+    config.ui.editorMode === "vim" && prompt.vimMode === "normal" ? 1 : 0;
+  const hintText = prompt.pasteHint ?? (exitArmed ? EXIT_HINT : null);
+  const pasteExtra = hintText ? 1 : 0;
   const planDenyExtra = planReview?.phase === "denying" ? 1 : 0;
   const pickerExtra =
     (prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0) +
     (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0) +
     (sessionPicker ? sessionPickerRows(sessionPicker.sessions) : 0);
-  // What the approval prompt may occupy before it would squeeze the transcript
-  // to nothing and push its own options off the bottom.
-  const permissionMaxRows = Math.max(10, (rows || 24) - footerHeight() - 3);
+  const spinnerRows = busy ? workingHeight() : 0;
+  // What the approval prompt may occupy before the pinned region would swallow
+  // the screen and push its own options out of view.
+  // Measured against the real terminal, not `rows`: in split-footer mode the
+  // React tree's height *is* the footer height, so deriving the footer from it
+  // would feed back on itself and collapse.
+  const screenRows = renderer.terminalHeight || 24;
+  const permissionMaxRows = Math.max(
+    MIN_PERMISSION_ROWS,
+    screenRows - footerHeight() - spinnerRows - pickerExtra - MIN_TRANSCRIPT_ROWS,
+  );
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80, permissionMaxRows)
     : planReview?.phase === "ready"
@@ -630,20 +665,29 @@ export function App({
         vimExtra +
         pasteExtra +
         planDenyExtra;
-  const inputRows = inputContent + 2 + pickerExtra + (busy ? workingHeight() : 0);
+  const inputRows = inputContent + 2 + pickerExtra + spinnerRows;
   const footerState = {
     busy,
     editorMode: config.ui.editorMode,
     vimMode: prompt.vimMode,
     showConfig,
-    browsingHistory,
     filePicker: Boolean(prompt.filePicker),
     commandPicker: Boolean(prompt.commandPicker),
     planReview: planReview?.phase,
     queued,
   };
-  const chrome = (showConfig ? 0 : inputRows) + footerHeight();
-  const timelineLines = Math.max(showConfig ? 2 : 3, (rows || 24) - chrome);
+  // The config panel takes over most of the screen; everything else asks for
+  // just what it draws.
+  const configRows = Math.max(MIN_PERMISSION_ROWS, screenRows - footerHeight() - 2);
+  const pinnedRows = Math.min(
+    Math.max(1, screenRows - MIN_TRANSCRIPT_ROWS),
+    (showConfig ? configRows : inputRows) + footerHeight(),
+  );
+
+  // Resize the pinned region to match what the chrome actually needs.
+  useEffect(() => {
+    renderer.footerHeight = pinnedRows;
+  }, [renderer, pinnedRows]);
 
   const armExit = useCallback(() => {
     if (exitArmed) {
@@ -738,40 +782,27 @@ export function App({
     if (showConfig) return;
 
     if (key.ctrl && key.name === "o") {
-      setExpandTools((value) => !value);
+      setExpandTools((value) => {
+        const next = !value;
+        push(
+          {
+            kind: "status",
+            id: nextId("s"),
+            text: next ? "tool output: expanded" : "tool output: summarized",
+          },
+          false,
+        );
+        return next;
+      });
       return;
     }
 
-    if (key.name === "pageup") {
-      const step = Math.max(1, Math.floor(timelineLines * 0.8));
-      scrollRef.current?.scrollBy(-step);
-      refreshBrowseState();
-    } else if (key.name === "pagedown") {
-      const step = Math.max(1, Math.floor(timelineLines * 0.8));
-      scrollRef.current?.scrollBy(step);
-      refreshBrowseState();
-    }
   });
 
   return (
     // No background fill: the UI draws over whatever the user's terminal theme
     // already provides, the way Claude Code does.
-    <box flexDirection="column" width="100%" height={rows || undefined}>
-      {!showConfig ? (
-        <box flexGrow={1} flexDirection="column" height={timelineLines}>
-          <Timeline
-            items={items}
-            columns={columns || 80}
-            thinking={thinking}
-            streaming={streaming}
-            expandAll={expandTools}
-            welcome={
-              <Welcome cwd={cwd} model={config.model} resumed={resumedCount || undefined} />
-            }
-            scrollRef={scrollRef}
-          />
-        </box>
-      ) : null}
+    <box flexDirection="column" width="100%" flexShrink={0}>
       {showConfig ? (
         <ConfigPanel
           config={config}
@@ -784,7 +815,7 @@ export function App({
           onStatus={(msg) => push({ kind: "status", id: nextId("s"), text: msg })}
           onRetryConnection={() => void checkConnection()}
           columns={columns || 80}
-          maxRows={timelineLines}
+          maxRows={configRows}
         />
       ) : (
         <>
@@ -824,7 +855,7 @@ export function App({
             busy={busy}
             vimMode={prompt.vimMode}
             editorMode={config.ui.editorMode}
-            pasteHint={prompt.pasteHint ?? (exitArmed ? "press ctrl+c again to exit" : null)}
+            pasteHint={hintText}
             planReview={planReview?.phase}
             planChoice={planChoice}
             pendingChoice={pendingChoice}
@@ -893,8 +924,14 @@ export async function runTui(opts: {
   const { createElement } = await import("react");
   await new Promise<void>(async (resolve, reject) => {
     try {
+      // The transcript lives in the terminal's own scrollback; the renderer
+      // owns only a pinned region at the bottom for the prompt and status.
+      // This is what makes output start at the top, the prompt sit directly
+      // beneath it, and the whole thing scroll like any other CLI.
       const renderer = await createCliRenderer({
-        screenMode: "alternate-screen",
+        screenMode: "split-footer",
+        externalOutputMode: "capture-stdout",
+        footerHeight: INITIAL_FOOTER_HEIGHT,
         // Ctrl+C is handled in-app so the first press interrupts rather than
         // taking the session down with it.
         exitOnCtrlC: false,

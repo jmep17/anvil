@@ -9,7 +9,6 @@ export interface FooterState {
   editorMode?: EditorMode;
   vimMode?: VimMode;
   showConfig?: boolean;
-  browsingHistory?: boolean;
   filePicker?: boolean;
   commandPicker?: boolean;
   planReview?: "ready" | "denying";
@@ -33,7 +32,6 @@ export function footerHint({
   editorMode,
   vimMode,
   showConfig,
-  browsingHistory,
   filePicker,
   commandPicker,
   planReview,
@@ -48,7 +46,6 @@ export function footerHint({
     const suffix = queued ? ` · ${queued} queued` : "";
     return `esc interrupt · ctrl+o expand output${suffix}`;
   }
-  if (browsingHistory) return "pgup/pgdn scroll · pgdn returns to live output";
   if (editorMode === "vim" && vimMode === "normal") return "-- NORMAL -- · i insert · ? for shortcuts";
   return "? for shortcuts";
 }
