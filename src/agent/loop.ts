@@ -60,6 +60,33 @@ function pickTools(all: ToolSet, allowlist?: string[]): ToolSet {
   return out;
 }
 
+export function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const seen = new Set<unknown>();
+  const findResponseBody = (value: unknown): string | undefined => {
+    if (!value || typeof value !== "object" || seen.has(value)) return undefined;
+    seen.add(value);
+    const candidate = value as {
+      responseBody?: unknown;
+      cause?: unknown;
+      lastError?: unknown;
+      errors?: unknown;
+    };
+    if (typeof candidate.responseBody === "string" && candidate.responseBody.trim()) {
+      return candidate.responseBody;
+    }
+    const nested = [candidate.cause, candidate.lastError];
+    if (Array.isArray(candidate.errors)) nested.push(...candidate.errors);
+    for (const item of nested) {
+      const responseBody = findResponseBody(item);
+      if (responseBody) return responseBody;
+    }
+    return undefined;
+  };
+  const responseBody = findResponseBody(error);
+  return responseBody ? `${message}\n${responseBody.slice(0, 2_000)}` : message;
+}
+
 async function resolveInjectedSkills(
   cwd: string,
   config: AnvilConfig,
@@ -210,7 +237,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     onError: ({ error }) => {
       opts.onEvent?.({
         type: "error",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       });
     },
     onChunk: ({ chunk }) => {

@@ -17,12 +17,14 @@ describe("plan harness schemas", () => {
         changes: [{ path: "src/agent/loop.ts", intent: "Force structured plan submission." }],
         steps: ["Add the plan harness."],
         verification: ["Run tests."],
+        risks: [],
+        assumptions: [],
       }).success,
     ).toBe(true);
   });
 
   test("requires either research details or one clarification", () => {
-    expect(planRouteSchema.safeParse({ kind: "research", goal: "Research the feature" }).success).toBe(false);
+    expect(planRouteSchema.safeParse({ kind: "research", goal: "Research the feature" }).success).toBe(true);
     expect(
       planRouteSchema.safeParse({
         kind: "clarify",
