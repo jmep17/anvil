@@ -43,9 +43,8 @@ describe("Timeline rendering", () => {
         ms: 42,
       },
     ]);
-    expect(frame).toContain("⏺ Read(src/cli.ts)");
-    expect(frame).toContain("⎿");
-    expect(frame).toContain("3 lines");
+    // Call and outcome share one row.
+    expect(frame).toContain("⏺ Read(src/cli.ts) · 3 lines");
     // The raw output stays hidden until it is expanded.
     expect(frame).not.toContain("|one");
   });
@@ -84,8 +83,7 @@ describe("Timeline rendering", () => {
         output: "Error: permission denied for Bash",
       },
     ]);
-    expect(frame).toContain("⏺ Bash(false)");
-    expect(frame).toContain("permission denied");
+    expect(frame).toContain("⏺ Bash(false) · Error: permission denied for Bash");
   });
 
   test("todos render as a checklist with completed items struck through", async () => {
@@ -235,6 +233,18 @@ describe("Timeline rendering", () => {
     expect(frame).toContain("4.2s");
   });
 
+  test("consecutive tool calls stack without blank lines between them", async () => {
+    const frame = await frameFor([
+      { kind: "tool", id: "t1", name: "Grep", input: { pattern: "x" }, status: "done", output: "a" },
+      { kind: "tool", id: "t2", name: "Read", input: { path: "a.ts" }, status: "done", output: "b" },
+      { kind: "tool", id: "t3", name: "Read", input: { path: "b.ts" }, status: "done", output: "c" },
+    ]);
+    const rows = frame.split("\n").map((l) => l.trimEnd());
+    const first = rows.findIndex((l) => l.includes("⏺ Grep"));
+    expect(rows[first + 1]).toContain("⏺ Read(a.ts)");
+    expect(rows[first + 2]).toContain("⏺ Read(b.ts)");
+  });
+
   test("the expand hint appears once, on the newest row", async () => {
     const two: TimelineItem[] = [
       {
@@ -259,8 +269,8 @@ describe("Timeline rendering", () => {
     const hintRows = lines.flatMap((line, i) => (line.includes("ctrl+o") ? [i] : []));
 
     expect(hintRows).toHaveLength(1);
-    // It hangs off the newest call's result row, not the older one's.
-    expect(hintRows[0]).toBeGreaterThan(lines.findIndex((l) => l.includes("b.ts")));
+    // It sits on the newest call's row, not an older one's.
+    expect(hintRows[0]).toBe(lines.findIndex((l) => l.includes("b.ts")));
   });
 
   test("thinking is labelled and indented", async () => {

@@ -205,27 +205,26 @@ const ToolRow = memo(function ToolRow({
         setExpandedSelf((value) => !value);
       }}
     >
+      {/* Call and outcome on one row, so a run of tools reads as a block
+          rather than a ladder — and no two glyph widths need to align. */}
       <box flexDirection="row" width="100%" flexShrink={0}>
         <text fg={fg}>{`${BULLET} `}</text>
         <text fg={colors.text} attributes={TextAttributes.BOLD}>
           {title}
         </text>
-        {duration ? <text fg={colors.faint}>{`  ${duration}`}</text> : null}
+        {summary ? (
+          <text fg={item.status === "error" ? colors.danger : colors.muted}>
+            {` · ${summary}`}
+          </text>
+        ) : null}
+        {duration ? <text fg={colors.faint}>{` · ${duration}`}</text> : null}
+        {!expanded && isLast && item.output ? (
+          <text fg={colors.faint}>{"  ctrl+o to expand"}</text>
+        ) : null}
       </box>
 
-      {!expanded ? (
-        <box flexDirection="row" width="100%" flexShrink={0}>
-          <text fg={colors.muted}>{`  ${CORNER}  ${summary}`}</text>
-          {/* Only the newest row carries the hint — on every row it is noise. */}
-          {isLast && item.output ? (
-            <text fg={colors.faint}>{"  ctrl+o to expand"}</text>
-          ) : null}
-        </box>
-      ) : (
+      {expanded ? (
         <>
-          <text fg={colors.muted}>
-            {`  ${CORNER}  ${item.name} input`}
-          </text>
           {wrapDisplayLines(formatToolInput(item.input), Math.max(12, width - 8)).map(
             (line, index) => (
               <text key={`in-${index}`} fg={colors.faint}>
@@ -233,18 +232,18 @@ const ToolRow = memo(function ToolRow({
               </text>
             ),
           )}
-          {item.output != null ? (
-            wrapDisplayLines(item.output, Math.max(12, width - 8)).map((line, index) => (
-              <text
-                key={`out-${index}`}
-                fg={item.status === "error" ? colors.danger : colors.muted}
-              >
-                {`${RESULT_INDENT}${line || " "}`}
-              </text>
-            ))
-          ) : null}
+          {item.output != null
+            ? wrapDisplayLines(item.output, Math.max(12, width - 8)).map((line, index) => (
+                <text
+                  key={`out-${index}`}
+                  fg={item.status === "error" ? colors.danger : colors.muted}
+                >
+                  {`${RESULT_INDENT}${line || " "}`}
+                </text>
+              ))
+            : null}
         </>
-      )}
+      ) : null}
     </box>
   );
 });
@@ -290,6 +289,8 @@ function spacingBefore(
   // The first item still needs air under the welcome block, but not when it
   // is the very first thing on screen.
   if (!previous) return atVeryTop ? 0 : 1;
+  // Consecutive one-line tool calls read as a single block of work.
+  if (item.kind === "tool" && previous.kind === "tool") return 0;
   return 1;
 }
 
