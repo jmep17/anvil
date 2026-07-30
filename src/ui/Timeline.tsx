@@ -362,7 +362,17 @@ export const Timeline = memo(function Timeline({
         viewportOptions: { flexGrow: 1 },
         // Spacing is decided per item rather than by a uniform gap, so a status
         // line can hug what it annotates instead of floating between blanks.
-        contentOptions: { flexDirection: "column", width: "100%" },
+        //
+        // Bottom-anchored, the way a terminal behaves: a short transcript sits
+        // just above the prompt and grows upward, instead of clinging to the
+        // top of the screen while new tool calls drop into the void beneath it.
+        contentOptions: {
+          flexDirection: "column",
+          width: "100%",
+          justifyContent: "flex-end",
+          // A blank row so the newest output never butts against the prompt.
+          paddingBottom: 1,
+        },
         // The transcript scrolls with the terminal's own conventions; a drawn
         // scrollbar is just a column of noise beside the text.
         verticalScrollbarOptions: { visible: false },

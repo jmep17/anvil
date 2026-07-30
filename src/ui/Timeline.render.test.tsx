@@ -144,6 +144,44 @@ describe("Timeline rendering", () => {
     }
   });
 
+  test("a short transcript sits above the prompt, not at the top of the screen", async () => {
+    const frame = await frameFor(
+      [
+        { kind: "user", id: "u1", text: "review the loop" },
+        {
+          kind: "tool",
+          id: "t1",
+          name: "Grep",
+          input: { pattern: "runAgent" },
+          status: "done",
+          output: "a\nb",
+        },
+      ],
+      70,
+      20,
+    );
+    const lines = frame.split("\n").map((line) => line.trimEnd());
+    const firstContent = lines.findIndex((line) => line !== "");
+    const lastContent = lines.map((line) => line !== "").lastIndexOf(true);
+
+    // The empty space belongs above the content, the way a terminal fills up.
+    expect(firstContent).toBeGreaterThan(4);
+    // And the newest output ends near the bottom, one blank row clear of it.
+    expect(lastContent).toBeGreaterThanOrEqual(lines.length - 4);
+  });
+
+  test("an overflowing transcript still shows its newest end", async () => {
+    const many: TimelineItem[] = Array.from({ length: 30 }, (_, i) => ({
+      kind: "user" as const,
+      id: `u${i}`,
+      text: `message number ${i}`,
+    }));
+    const frame = await frameFor(many, 70, 12);
+
+    expect(frame).toContain("message number 29");
+    expect(frame).not.toContain("message number 0\n");
+  });
+
   test("a status line hugs what it annotates, turns and tools breathe", async () => {
     const frame = await frameFor([
       { kind: "user", id: "u1", text: "do the thing" },
