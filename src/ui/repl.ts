@@ -7,20 +7,29 @@ import type { AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent } from "../tools/index.ts";
 import { allowAll, askPermissionCli } from "../tools/permissions.ts";
+import { formatToolDuration, summarizeToolInput, truncateDisplay } from "./format.ts";
 
 function printEvent(event: AgentEvent): void {
   switch (event.type) {
     case "text":
       process.stdout.write(event.text);
       break;
-    case "tool_start":
-      console.log(`\n\x1b[36m→ ${event.name}\x1b[0m ${summarize(event.input)}`);
+    case "thinking":
+      process.stderr.write(`\x1b[2m${event.text}\x1b[0m`);
       break;
-    case "tool_end":
+    case "tool_start":
       console.log(
-        `\x1b[2m↩ ${event.name}: ${event.output.slice(0, 200).replace(/\n/g, " ")}\x1b[0m`,
+        `\n\x1b[36m→ ${event.name}\x1b[0m ${summarizeToolInput(event.input)}`,
       );
       break;
+    case "tool_end": {
+      const dur = formatToolDuration(event.ms);
+      const mark = event.error ? "\x1b[31m✗" : "\x1b[2m↩";
+      const reset = "\x1b[0m";
+      const out = truncateDisplay(event.output.replace(/\n/g, " "), 200);
+      console.log(`${mark} ${event.name}${dur ? ` (${dur})` : ""}: ${out}${reset}`);
+      break;
+    }
     case "status":
       console.log(`\x1b[2m${event.message}\x1b[0m`);
       break;
@@ -29,15 +38,6 @@ function printEvent(event: AgentEvent): void {
     case "error":
       console.error(`\x1b[31m${event.message}\x1b[0m`);
       break;
-  }
-}
-
-function summarize(input: unknown): string {
-  try {
-    const s = JSON.stringify(input);
-    return s.length > 120 ? `${s.slice(0, 117)}…` : s;
-  } catch {
-    return String(input);
   }
 }
 

@@ -52,7 +52,19 @@ bun run anvil -- -p -y "list files and summarize README.md"
 - **build** (default): full tools with permission prompts for Write/Edit/Bash
 - **plan**: read-only (no Write/Edit/Bash) — `/mode plan`
 
-Esc interrupts a running turn in the TUI.
+Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal alternate screen (fullscreen).
+
+### TUI keybinds
+
+| Key | Action |
+|-----|--------|
+| Enter | Send message |
+| Ctrl+J / Shift+Enter | Insert newline |
+| Esc | Interrupt turn (while busy) or clear input |
+| Shift+Tab | Toggle plan ↔ build |
+| a / A / d | Allow / always allow / deny tool permission |
+
+Paste into the prompt is supported (including multiline).
 
 ## Config
 

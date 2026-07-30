@@ -6,8 +6,16 @@ export type PermissionDecision = "allow" | "always" | "deny";
 
 export type AgentEvent =
   | { type: "text"; text: string }
-  | { type: "tool_start"; name: string; input: unknown }
-  | { type: "tool_end"; name: string; output: string; error?: boolean }
+  | { type: "thinking"; text: string }
+  | { type: "tool_start"; id: string; name: string; input: unknown }
+  | {
+      type: "tool_end";
+      id: string;
+      name: string;
+      output: string;
+      error?: boolean;
+      ms?: number;
+    }
   | { type: "status"; message: string }
   | { type: "error"; message: string }
   | { type: "step"; step: number };

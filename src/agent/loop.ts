@@ -172,27 +172,49 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     onChunk: ({ chunk }) => {
       if (chunk.type === "text-delta") {
         opts.onEvent?.({ type: "text", text: chunk.text });
+      } else if (chunk.type === "reasoning-delta") {
+        opts.onEvent?.({ type: "thinking", text: chunk.text });
       }
     },
-    onStepFinish: async ({ toolCalls, toolResults }) => {
-      step += 1;
-      opts.onEvent?.({ type: "step", step });
-      for (const call of toolCalls ?? []) {
-        opts.onEvent?.({
-          type: "tool_start",
-          name: call.toolName,
-          input: call.input,
-        });
-      }
-      for (const tr of toolResults ?? []) {
-        const output =
-          typeof tr.output === "string" ? tr.output : JSON.stringify(tr.output);
+    onToolExecutionStart: ({ toolCall }) => {
+      opts.onEvent?.({
+        type: "tool_start",
+        id: toolCall.toolCallId,
+        name: toolCall.toolName,
+        input: toolCall.input,
+      });
+    },
+    onToolExecutionEnd: ({ toolCall, toolOutput, toolExecutionMs }) => {
+      if (toolOutput.type === "tool-error") {
+        const err =
+          toolOutput.error instanceof Error
+            ? toolOutput.error.message
+            : String(toolOutput.error);
         opts.onEvent?.({
           type: "tool_end",
-          name: tr.toolName,
-          output: output.slice(0, 500),
+          id: toolCall.toolCallId,
+          name: toolCall.toolName,
+          output: err.slice(0, 500),
+          error: true,
+          ms: toolExecutionMs,
         });
+        return;
       }
+      const output =
+        typeof toolOutput.output === "string"
+          ? toolOutput.output
+          : JSON.stringify(toolOutput.output);
+      opts.onEvent?.({
+        type: "tool_end",
+        id: toolCall.toolCallId,
+        name: toolCall.toolName,
+        output: output.slice(0, 500),
+        ms: toolExecutionMs,
+      });
+    },
+    onStepFinish: async () => {
+      step += 1;
+      opts.onEvent?.({ type: "step", step });
     },
   });
 
