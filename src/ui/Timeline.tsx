@@ -1,9 +1,15 @@
-import { useMemo, type Ref } from "react";
+import { useMemo, useState, type Ref } from "react";
 import {
+  MouseButton,
   TextAttributes,
   type ScrollBoxRenderable,
 } from "@opentui/core";
-import { formatToolDuration, formatToolInput, wrapDisplayLines } from "./format.ts";
+import {
+  formatToolDuration,
+  formatToolInput,
+  summarizeToolInput,
+  wrapDisplayLines,
+} from "./format.ts";
 import { colors, getMarkdownSyntaxStyle } from "./theme.ts";
 import type { TimelineItem } from "./types.ts";
 
@@ -165,6 +171,7 @@ function ToolBlock({
   item: Extract<TimelineItem, { kind: "tool" }>;
   width: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const tone: Tone =
     item.status === "running"
       ? "tool-running"
@@ -176,31 +183,54 @@ function ToolBlock({
     item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
   const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
   const duration = formatToolDuration(item.ms);
-  const title = `╭─ ${icon} ${item.name} · ${state}${duration ? ` · ${duration}` : ""}`;
+  const chevron = expanded ? "▾" : "▸";
+  const title = `${chevron} ${icon} ${item.name} · ${state}${duration ? ` · ${duration}` : ""}`;
+  const summary = summarizeToolInput(item.input, Math.max(16, width - 2));
+
   return (
     <box flexDirection="column" width="100%" flexShrink={0}>
-      <text fg={fg}>{title}</text>
-      <text fg={colors.gray} attributes={TextAttributes.DIM}>
-        │  input
-      </text>
-      {wrapDisplayLines(formatToolInput(item.input), width).map((line, index) => (
-        <text key={`in-${index}`} fg={colors.gray} attributes={TextAttributes.DIM}>
-          {`│  ${line || " "}`}
-        </text>
-      ))}
-      {item.output != null ? (
+      <box
+        flexDirection="column"
+        width="100%"
+        flexShrink={0}
+        onMouseDown={(event) => {
+          if (event.button !== MouseButton.LEFT) return;
+          event.stopPropagation();
+          setExpanded((value) => !value);
+        }}
+      >
+        <text fg={fg}>{title}</text>
+        {!expanded && summary ? (
+          <text fg={colors.muted} attributes={TextAttributes.DIM}>
+            {`  ${summary}`}
+          </text>
+        ) : null}
+      </box>
+      {expanded ? (
         <>
           <text fg={colors.gray} attributes={TextAttributes.DIM}>
-            │  output
+            │  input
           </text>
-          {wrapDisplayLines(item.output, width).map((line, index) => (
-            <text key={`out-${index}`} fg={fg}>
+          {wrapDisplayLines(formatToolInput(item.input), width).map((line, index) => (
+            <text key={`in-${index}`} fg={colors.gray} attributes={TextAttributes.DIM}>
               {`│  ${line || " "}`}
             </text>
           ))}
+          {item.output != null ? (
+            <>
+              <text fg={colors.gray} attributes={TextAttributes.DIM}>
+                │  output
+              </text>
+              {wrapDisplayLines(item.output, width).map((line, index) => (
+                <text key={`out-${index}`} fg={fg}>
+                  {`│  ${line || " "}`}
+                </text>
+              ))}
+            </>
+          ) : null}
+          <text fg={fg}>╰─</text>
         </>
       ) : null}
-      <text fg={fg}>╰─</text>
     </box>
   );
 }

@@ -22,13 +22,13 @@ export function footerHint({
   filePicker,
 }: FooterState): string {
   if (showConfig) return "↑/↓ navigate · Enter edit · Esc close";
-  if (busy) return "PgUp/PgDn transcript · Esc interrupt";
+  if (busy) return "PgUp/PgDn transcript · click tool to expand · Esc interrupt";
   if (filePicker) return "↑/↓ files · Tab/Enter select · Esc dismiss · type to filter";
   if (browsingHistory) return "PgUp/PgDn transcript · PgDn returns live · Enter send · /config /exit";
   if (editorMode === "vim" && vimMode === "normal") {
     return "hjkl move · i insert · Enter send · Ctrl+G editor · /config";
   }
-  return "Enter send · @ file · PgUp/PgDn transcript · Ctrl+J newline · Ctrl+G editor · Esc clear · /config /retry /exit";
+  return "Enter send · @ file · click tool to expand · PgUp/PgDn · Ctrl+J newline · Ctrl+G editor · Esc clear · /config /retry /exit";
 }
 
 export function footerHeight(state: FooterState, columns: number): number {

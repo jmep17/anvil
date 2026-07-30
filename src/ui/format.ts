@@ -9,6 +9,45 @@ export function formatToolInput(input: unknown): string {
   }
 }
 
+const SUMMARY_KEYS = [
+  "command",
+  "path",
+  "file_path",
+  "filePath",
+  "pattern",
+  "query",
+  "url",
+  "content",
+] as const;
+
+/** One-line preview for a collapsed tool row. */
+export function summarizeToolInput(input: unknown, maxLen = 72): string {
+  const limit = Math.max(8, Math.floor(maxLen));
+  const clip = (s: string) => {
+    const one = s.replace(/\s+/g, " ").trim();
+    if (one.length <= limit) return one;
+    return `${one.slice(0, Math.max(1, limit - 1))}…`;
+  };
+
+  if (input == null) return "";
+  if (typeof input === "string") return clip(input);
+  if (typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    for (const key of SUMMARY_KEYS) {
+      const value = obj[key];
+      if (typeof value === "string" && value.trim()) return clip(value);
+    }
+    for (const value of Object.values(obj)) {
+      if (typeof value === "string" && value.trim()) return clip(value);
+    }
+  }
+  try {
+    return clip(JSON.stringify(input) ?? "");
+  } catch {
+    return clip(String(input));
+  }
+}
+
 /**
  * Wrap text ourselves instead of relying on Ink's implicit wrapping. That keeps
  * a changing streamed response from being clipped at an arbitrary character.

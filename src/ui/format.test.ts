@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { formatToolDuration, formatToolInput, wrapDisplayLines } from "./format.ts";
+import {
+  formatToolDuration,
+  formatToolInput,
+  summarizeToolInput,
+  wrapDisplayLines,
+} from "./format.ts";
 
 describe("formatToolInput", () => {
   test("prints complete structured input without summary truncation", () => {
@@ -11,6 +16,23 @@ describe("formatToolInput", () => {
 
   test("preserves string input exactly", () => {
     expect(formatToolInput("line one\nline two")).toBe("line one\nline two");
+  });
+});
+
+describe("summarizeToolInput", () => {
+  test("prefers command for bash-like payloads", () => {
+    expect(summarizeToolInput({ command: "ls -la", timeout_ms: 1000 })).toBe("ls -la");
+  });
+
+  test("prefers path and truncates long values", () => {
+    const path = `src/${"deep/".repeat(20)}file.ts`;
+    const summary = summarizeToolInput({ path, offset: 1 }, 24);
+    expect(summary.length).toBeLessThanOrEqual(24);
+    expect(summary.endsWith("…")).toBe(true);
+  });
+
+  test("returns empty for nullish input", () => {
+    expect(summarizeToolInput(null)).toBe("");
   });
 });
 
