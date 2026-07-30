@@ -57,6 +57,25 @@ bun run anvil -- -p -y "list files and summarize README.md"
 
 Esc (or Ctrl+C) interrupts a running turn in the TUI, killing any command it spawned.
 
+### When a turn goes quiet
+
+A local model server under memory pressure stops producing tokens without closing
+the connection, so an agent that simply waits will wait forever. Anvil bounds the
+silence instead: if nothing arrives for longer than the budget for whatever it is
+waiting on, the turn ends with an error naming the phase and how long it was stuck,
+rather than spinning indefinitely. The working line also says what it is blocked on
+(`waiting for the model`, `thinking`, a tool name) and, once a phase passes ten
+seconds, how long it has been there.
+
+Defaults are deliberately generous — waiting for the first token covers prompt
+processing, which on a long conversation is legitimately slow:
+
+```bash
+anvil config set timeouts.firstChunkMs 300000   # 5 min to the first token
+anvil config set timeouts.chunkMs 120000        # 2 min between tokens
+anvil config set timeouts.toolMs 300000         # 5 min for one tool
+```
+
 The TUI renders inline rather than taking over the screen: the transcript is written
 to the terminal's own scrollback and only the prompt and status line are pinned to a
 reserved region at the bottom. Output starts where your shell prompt was and grows
@@ -167,6 +186,11 @@ Example `~/.anvil/config.json`:
   "model": "qwen/qwen3.6-27b",
   "contextLength": 65536,
   "maxSteps": 40,
+  "timeouts": {
+    "firstChunkMs": 300000,
+    "chunkMs": 120000,
+    "toolMs": 300000
+  },
   "ui": {
     "editorMode": "emacs",
     "editor": "nvim",

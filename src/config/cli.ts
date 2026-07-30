@@ -96,7 +96,10 @@ export function coerceConfigValue(keyPath: string[], raw: string): unknown {
     leaf === "maxSteps" ||
     leaf === "maxInjectSkills" ||
     leaf === "maxInjectChars" ||
-    leaf === "maxChars"
+    leaf === "maxChars" ||
+    leaf === "firstChunkMs" ||
+    leaf === "chunkMs" ||
+    leaf === "toolMs"
   ) {
     const n = Number(raw);
     if (!Number.isFinite(n)) throw new Error(`${joined} must be a number`);

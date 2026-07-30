@@ -29,6 +29,10 @@ import {
 } from "./planHarness.ts";
 import { shouldPauseReadTool } from "./stall.ts";
 import { buildSystemPrompt } from "./system.ts";
+import { StallDetector, stallMessage, type StallPhase } from "./watchdog.ts";
+
+/** How often the silence detector is consulted. */
+const STALL_POLL_MS = 1_000;
 
 export interface RunAgentOptions {
   config: AnvilConfig;
@@ -116,6 +120,19 @@ async function resolveInjectedSkills(
   });
 }
 
+/**
+ * An abort signal that fires when the caller's does, and also when this run
+ * decides to give up on a silent server. Returned rather than mutating the
+ * caller's so an interrupt still means exactly what it did before.
+ */
+function chainAbort(parent?: AbortSignal): AbortController {
+  const controller = new AbortController();
+  if (!parent) return controller;
+  if (parent.aborted) controller.abort(parent.reason);
+  else parent.addEventListener("abort", () => controller.abort(parent.reason), { once: true });
+  return controller;
+}
+
 export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const depth = opts.depth ?? 0;
   const planHarness = opts.config.mode === "plan" && depth === 0 ? new PlanHarness() : undefined;
@@ -147,12 +164,21 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   let mcpTools: ToolSet = opts.mcpTools ?? {};
   let mcpHandles: McpHandle[] = [];
 
+  // Every stall shape ends here: the caller's interrupt, and this run giving up
+  // on a server that has stopped answering.
+  const abort = chainAbort(opts.abortSignal);
+  const stall = new StallDetector(opts.config.timeouts, Date.now());
+  // Held in an object: a plain `let` assigned only inside a callback is
+  // narrowed to `never` by the time the catch below reads it.
+  const stalled: { hit: { phase: StallPhase; idleMs: number } | null } = { hit: null };
+  const beat = (phase?: StallPhase) => stall.beat(Date.now(), phase);
+
   const ctx: ToolContext = {
     cwd: opts.cwd,
     mode: opts.config.mode,
     alwaysAllowed,
     askPermission: opts.askPermission,
-    abortSignal: opts.abortSignal,
+    abortSignal: abort.signal,
     maxOutputChars: toolOutputBudget(opts.config.contextLength),
     emit: opts.onEvent,
     todos,
@@ -169,7 +195,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         messages: [{ role: "user", content: prompt }],
         askPermission: opts.askPermission,
         onEvent: opts.onEvent,
-        abortSignal: opts.abortSignal,
+        abortSignal: abort.signal,
         skipMcp: true,
         mcpTools,
         toolAllowlist: toolNames,
@@ -224,11 +250,21 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     instructions: system,
     messages,
     tools,
-    abortSignal: opts.abortSignal,
+    abortSignal: abort.signal,
     stopWhen: planHarness
       ? [isStepCount(opts.config.maxSteps), () => planHarness.isComplete]
       : isStepCount(opts.config.maxSteps),
     maxRetries: 2,
+    // A local server under memory pressure stops producing tokens without ever
+    // closing the connection, and the agent would otherwise wait on it for as
+    // long as the user let it. These bound the silence rather than the work:
+    // the first-token budget is deliberately large because prompt processing on
+    // a long conversation is legitimately slow.
+    timeout: {
+      firstChunkMs: opts.config.timeouts.firstChunkMs,
+      chunkMs: opts.config.timeouts.chunkMs,
+      toolMs: opts.config.timeouts.toolMs,
+    },
     // The system prompt is never rewritten between steps. It is the prompt
     // prefix, and a local server caches its KV state; changing it forces the
     // whole context to be re-encoded before each step, which is felt as the
@@ -264,6 +300,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       });
     },
     onChunk: ({ chunk }) => {
+      // Only a delta means tokens are actually flowing. The stream's opening
+      // chunk arrives before prompt processing has even started, and must not
+      // downgrade the budget from the generous first-token one.
+      beat(chunk.type.endsWith("-delta") ? "chunk" : undefined);
       if (chunk.type === "reasoning-delta") {
         opts.onEvent?.({ type: "thinking", text: chunk.text });
       } else if (chunk.type === "text-delta") {
@@ -272,6 +312,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       }
     },
     onToolExecutionStart: ({ toolCall }) => {
+      beat("tool");
       opts.onEvent?.({
         type: "tool_start",
         id: toolCall.toolCallId,
@@ -280,6 +321,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       });
     },
     onToolExecutionEnd: ({ toolCall, toolOutput, toolExecutionMs }) => {
+      // Back to waiting on the model, which gets the larger budget.
+      beat("first-chunk");
       if (toolOutput.type === "tool-error") {
         const err =
           toolOutput.error instanceof Error
@@ -311,6 +354,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       });
     },
     onStepFinish: async ({ text, toolCalls }) => {
+      beat("first-chunk");
       step += 1;
       // Fallback for providers that return a step's prose in one piece rather
       // than as deltas; without it the response would never reach the UI.
@@ -322,8 +366,27 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     },
   });
 
-  const finalText = await result.text;
-  const responseMessages = (await result.response).messages;
+  const watch = setInterval(() => {
+    const idleMs = stall.overdue(Date.now());
+    if (idleMs == null) return;
+    stalled.hit = { phase: stall.phase, idleMs };
+    opts.onEvent?.({ type: "error", message: stallMessage(stall.phase, idleMs) });
+    abort.abort(new Error(stallMessage(stall.phase, idleMs)));
+  }, STALL_POLL_MS);
+
+  let finalText: string;
+  let responseMessages: ModelMessage[];
+  try {
+    finalText = await result.text;
+    responseMessages = (await result.response).messages;
+  } catch (err) {
+    // Report the stall, not the abort it caused — "operation was aborted" reads
+    // as if the user had pressed Esc.
+    if (stalled.hit) throw new Error(stallMessage(stalled.hit.phase, stalled.hit.idleMs));
+    throw err;
+  } finally {
+    clearInterval(watch);
+  }
   const nextMessages = [...messages, ...responseMessages];
 
   // Ensure callers always get the assembled assistant text even if chunk streaming was sparse

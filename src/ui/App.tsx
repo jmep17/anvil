@@ -35,7 +35,7 @@ import { LiveOutput, liveOutputRows } from "./LiveOutput.tsx";
 import { appendPromptHistory, loadPromptHistory } from "./promptHistory.ts";
 import { commitItem, commitItems, commitWelcome } from "./scrollback.ts";
 import { SessionPicker, sessionPickerRows } from "./SessionPicker.tsx";
-import { Working, workingHeight } from "./Working.tsx";
+import { Working, workingHeight, type WorkingActivity } from "./Working.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
 import {
@@ -111,6 +111,16 @@ export function App({
   const expandToolsRef = useRef(expandTools);
   expandToolsRef.current = expandTools;
   const [startedAt, setStartedAt] = useState(0);
+  // What the turn is blocked on. Without it a stalled server and a busy one
+  // look identical: a spinner and a growing clock.
+  const [activity, setActivity] = useState<WorkingActivity | null>(null);
+  const activityRef = useRef<WorkingActivity | null>(null);
+  const setPhase = useCallback((label: string) => {
+    if (activityRef.current?.label === label) return;
+    const next = { label, since: Date.now() };
+    activityRef.current = next;
+    setActivity(next);
+  }, []);
   const [contextUsed, setContextUsed] = useState(0);
   // Recomputed at turn boundaries only: estimateTokens walks the whole
   // conversation, which is far too costly to redo on every streamed frame.
@@ -441,6 +451,7 @@ export function App({
 
       setBusy(true);
       setStartedAt(Date.now());
+      setPhase("waiting for the model");
       cancelLiveRender();
       setStreaming("");
       setThinking("");
@@ -470,15 +481,19 @@ export function App({
       const onEvent = (event: AgentEvent) => {
         if (event.type === "text") {
           streamedAny = true;
+          setPhase("responding");
           streamingAccRef.current += event.text;
           scheduleLiveRender();
         } else if (event.type === "thinking") {
+          setPhase("thinking");
           thinkingAccRef.current += event.text;
           scheduleLiveRender();
         } else if (event.type === "tool_start") {
+          setPhase(event.name);
           flushLive();
           toolInputsRef.current.set(event.id, event.input);
         } else if (event.type === "tool_end") {
+          setPhase("waiting for the model");
           const nextItem: Extract<TimelineItem, { kind: "tool" }> = {
             kind: "tool",
             id: event.id,
@@ -542,6 +557,8 @@ export function App({
         });
       } finally {
         setBusy(false);
+        activityRef.current = null;
+        setActivity(null);
         abortRef.current = null;
         const tokens = estimateTokens(messagesRef.current);
         setContextTokens(tokens);
@@ -561,6 +578,7 @@ export function App({
       planReview,
       recordTimeline,
       scheduleLiveRender,
+      setPhase,
       session,
       completeTool,
     ],
@@ -905,6 +923,7 @@ export function App({
               startedAt={startedAt}
               tokens={contextTokens}
               queued={queued}
+              activity={activity}
             />
           ) : null}
           {prompt.filePicker ? (

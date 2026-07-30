@@ -4,11 +4,13 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_SKILLS_CONFIG,
+  DEFAULT_TIMEOUT_CONFIG,
   DEFAULT_UI_CONFIG,
   type AnvilConfig,
   type ContextConfig,
   type McpServerConfig,
   type SkillsConfig,
+  type TimeoutConfig,
   type UiConfig,
 } from "./types.ts";
 
@@ -67,6 +69,18 @@ function mergeContext(
   };
 }
 
+function mergeTimeouts(base: TimeoutConfig, partial: unknown): TimeoutConfig {
+  if (!partial || typeof partial !== "object") return base;
+  const p = partial as Record<string, unknown>;
+  const positive = (value: unknown, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  return {
+    firstChunkMs: positive(p.firstChunkMs, base.firstChunkMs),
+    chunkMs: positive(p.chunkMs, base.chunkMs),
+    toolMs: positive(p.toolMs, base.toolMs),
+  };
+}
+
 function mergeUi(base: UiConfig, partial: unknown): UiConfig {
   if (!partial || typeof partial !== "object") return base;
   const p = partial as Record<string, unknown>;
@@ -88,6 +102,7 @@ function mergePartial(base: AnvilConfig, partial: Record<string, unknown> | null
     skills: { ...base.skills },
     context: { ...base.context },
     ui: { ...base.ui },
+    timeouts: { ...base.timeouts },
   };
   if (typeof partial.baseURL === "string") next.baseURL = partial.baseURL;
   if (typeof partial.timezone === "string" && partial.timezone.trim()) {
@@ -107,6 +122,7 @@ function mergePartial(base: AnvilConfig, partial: Record<string, unknown> | null
   if ("skills" in partial) next.skills = mergeSkills(base.skills, partial.skills);
   if ("context" in partial) next.context = mergeContext(base.context, partial.context);
   if ("ui" in partial) next.ui = mergeUi(base.ui, partial.ui);
+  if ("timeouts" in partial) next.timeouts = mergeTimeouts(base.timeouts, partial.timeouts);
   return next;
 }
 
@@ -119,6 +135,7 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
       skills: { ...DEFAULT_SKILLS_CONFIG },
       context: { ...DEFAULT_CONTEXT_CONFIG },
       ui: { ...DEFAULT_UI_CONFIG },
+      timeouts: { ...DEFAULT_TIMEOUT_CONFIG },
     },
     globalCfg,
   );
@@ -142,6 +159,9 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
       ? mergeContext(cfg.context, overrides.context)
       : cfg.context,
     ui: overrides.ui ? mergeUi(cfg.ui, overrides.ui) : cfg.ui,
+    timeouts: overrides.timeouts
+      ? mergeTimeouts(cfg.timeouts, overrides.timeouts)
+      : cfg.timeouts,
   };
 
   return cfg;

@@ -37,15 +37,42 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-/** `✻ Pondering… (12s · 1.4k tokens · esc to interrupt)` */
+/** What the turn is currently blocked on, and when it started waiting. */
+export interface WorkingActivity {
+  label: string;
+  since: number;
+}
+
+/**
+ * How long a phase must last before its own duration is worth showing. Below
+ * this it is just noise; above it, it is the difference between "this is slow"
+ * and "this has hung, and here is what on".
+ */
+export const ACTIVITY_HINT_MS = 10_000;
+
+/** `✻ Pondering… (12s · waiting for the model 11s · esc to interrupt)` */
 export function workingLabel(
   frame: string,
   verb: string,
   elapsedMs: number,
-  tokens?: number,
-  queued?: number,
+  extra: {
+    tokens?: number;
+    queued?: number;
+    activity?: string;
+    activityMs?: number;
+  } = {},
 ): string {
+  const { tokens, queued, activity, activityMs } = extra;
   const parts = [formatElapsed(elapsedMs)];
+  if (activity) {
+    // A turn that has been silent for an hour should say so, and say what it
+    // was silent on. The spinner alone reads as progress.
+    parts.push(
+      activityMs != null && activityMs >= ACTIVITY_HINT_MS
+        ? `${activity} ${formatElapsed(activityMs)}`
+        : activity,
+    );
+  }
   if (tokens && tokens > 0) {
     parts.push(tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k tokens` : `${tokens} tokens`);
   }
@@ -58,20 +85,28 @@ export const Working = memo(function Working({
   startedAt,
   tokens,
   queued,
+  activity,
 }: {
   startedAt: number;
   tokens?: number;
   queued?: number;
+  activity?: WorkingActivity | null;
 }) {
   const tick = useTicker(true, FRAME_MS);
-  const elapsed = Date.now() - startedAt;
+  const now = Date.now();
+  const elapsed = now - startedAt;
   const frame = FRAMES[tick % FRAMES.length]!;
   const verb = VERBS[Math.floor(elapsed / VERB_MS) % VERBS.length]!;
 
   return (
     <box flexDirection="row" flexShrink={0} paddingX={1}>
       <text fg={colors.accent} attributes={TextAttributes.BOLD}>
-        {workingLabel(frame, verb, elapsed, tokens, queued)}
+        {workingLabel(frame, verb, elapsed, {
+          tokens,
+          queued,
+          activity: activity?.label,
+          activityMs: activity ? now - activity.since : undefined,
+        })}
       </text>
     </box>
   );

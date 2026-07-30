@@ -53,6 +53,24 @@ export interface UiConfig {
   theme: ThemePreference;
 }
 
+/**
+ * Ceilings on how long a turn may sit silent. A local server that has been
+ * asked for more context than it can hold, or that has lost its GPU, does not
+ * close the connection — it simply never sends a token, and without these the
+ * agent waits for it forever with nothing on screen but a spinner.
+ */
+export interface TimeoutConfig {
+  /**
+   * Wait for the first token of a step. Generous: this covers prompt
+   * processing, which on a long conversation is genuinely slow. Default 5 min.
+   */
+  firstChunkMs: number;
+  /** Gap between tokens once they have started. Default 2 min. */
+  chunkMs: number;
+  /** Any single tool execution. Default 5 min. */
+  toolMs: number;
+}
+
 export interface AnvilConfig {
   baseURL: string;
   /**
@@ -69,7 +87,14 @@ export interface AnvilConfig {
   skills: SkillsConfig;
   context: ContextConfig;
   ui: UiConfig;
+  timeouts: TimeoutConfig;
 }
+
+export const DEFAULT_TIMEOUT_CONFIG: TimeoutConfig = {
+  firstChunkMs: 300_000,
+  chunkMs: 120_000,
+  toolMs: 300_000,
+};
 
 export const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
   autoDetect: true,
@@ -103,4 +128,5 @@ export const DEFAULT_CONFIG: AnvilConfig = {
   skills: { ...DEFAULT_SKILLS_CONFIG },
   context: { ...DEFAULT_CONTEXT_CONFIG },
   ui: { ...DEFAULT_UI_CONFIG },
+  timeouts: { ...DEFAULT_TIMEOUT_CONFIG },
 };
