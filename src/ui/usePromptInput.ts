@@ -79,6 +79,11 @@ interface Options {
   onPasteNotice?: (msg: string) => void;
   isActive?: boolean;
   initialHistory?: string[];
+  /**
+   * Called when ↑ is pressed on an empty prompt. Return true to consume the
+   * key — the owner is showing a picker over the same history.
+   */
+  onHistoryRecall?: () => boolean;
 }
 
 /** True when the cursor sits on the buffer's first line. */
@@ -131,6 +136,15 @@ export function usePromptInput(opts: Options) {
   const loadGen = useRef(0);
   const optsRef = useRef(opts);
   optsRef.current = opts;
+
+  // History is read from disk after mount, so the ring cannot be seeded at
+  // first render. Adopt it only while nothing has been typed this session,
+  // which keeps a late load from discarding prompts made in the meantime.
+  useEffect(() => {
+    const entries = opts.initialHistory;
+    if (!entries?.length) return;
+    setHistory((h) => (h.entries.length > 0 ? h : createHistory(entries)));
+  }, [opts.initialHistory]);
 
   const resetBuffer = useCallback(() => {
     setBuffer(createBuffer(""));
@@ -467,6 +481,9 @@ export function usePromptInput(opts: Options) {
     // At the buffer's edges the arrows recall earlier prompts instead of doing
     // nothing; inside a multi-line draft they still move the cursor.
     if (key.name === "up" && onFirstLine(buffer)) {
+      // Nothing typed yet: show the whole history rather than making the user
+      // step blindly back through it one prompt at a time.
+      if (!buffer.value && optsRef.current.onHistoryRecall?.()) return;
       const step = historyPrevious(historyRef.current, buffer.value);
       setHistory(step.history);
       if (step.value !== null) {

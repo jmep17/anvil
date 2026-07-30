@@ -21,6 +21,8 @@ import { findCommand, helpText, parseCommand } from "./commands.ts";
 import { ConfigPanel } from "./ConfigPanel.tsx";
 import { Footer, footerHeight } from "./Footer.tsx";
 import { FilePicker, filePickerRows } from "./FilePicker.tsx";
+import { MAX_HISTORY } from "./history.ts";
+import { HistoryPicker, historyPickerRows } from "./HistoryPicker.tsx";
 import {
   InputBox,
   PERMISSION_CHOICES,
@@ -29,6 +31,8 @@ import {
   permissionContentRows,
   planReviewContentRows,
 } from "./InputBox.tsx";
+import { LiveOutput, liveOutputRows } from "./LiveOutput.tsx";
+import { appendPromptHistory, loadPromptHistory } from "./promptHistory.ts";
 import { commitItem, commitItems, commitWelcome } from "./scrollback.ts";
 import { SessionPicker, sessionPickerRows } from "./SessionPicker.tsx";
 import { Working, workingHeight } from "./Working.tsx";
@@ -77,6 +81,14 @@ export function App({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("starting…");
   const [serverReady, setServerReady] = useState(false);
+  // Read by `submit`, which may be called from the same tick that establishes
+  // the connection — a prompt passed on the command line used to be rejected
+  // as offline because the state update had not landed yet.
+  const serverReadyRef = useRef(false);
+  const markServerReady = useCallback((ok: boolean) => {
+    serverReadyRef.current = ok;
+    setServerReady(ok);
+  }, []);
   const [showConfig, setShowConfig] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
@@ -111,6 +123,15 @@ export function App({
     sessions: SessionSummary[];
     selected: number;
   } | null>(null);
+  const [historyPicker, setHistoryPicker] = useState<{
+    /** Oldest first, so ↑ walks backwards in time and up the list at once. */
+    entries: string[];
+    selected: number;
+  } | null>(null);
+  // Persisted per project, so ↑ recall survives a restart.
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  const promptHistoryRef = useRef(promptHistory);
+  promptHistoryRef.current = promptHistory;
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
   const messagesRef = useRef<ModelMessage[]>([]);
@@ -256,7 +277,7 @@ export function App({
       setStatus(`checking ${cfg.baseURL}…`);
       const probe = await probeServer(cfg);
       if (!probe.ok) {
-        setServerReady(false);
+        markServerReady(false);
         setStatus(`offline · ${probe.detail}`);
         push(
           {
@@ -268,11 +289,11 @@ export function App({
         );
         return false;
       }
-      setServerReady(true);
+      markServerReady(true);
       refreshStatus(cfg, cfg.mode);
       return true;
     },
-    [push, refreshStatus],
+    [markServerReady, push, refreshStatus],
   );
 
   const askPermission = useCallback(
@@ -406,7 +427,7 @@ export function App({
         }
       }
 
-      if (!serverReady) {
+      if (!serverReadyRef.current) {
         push(
           {
             kind: "error",
@@ -539,7 +560,6 @@ export function App({
       push,
       planReview,
       recordTimeline,
-      serverReady,
       scheduleLiveRender,
       session,
       completeTool,
@@ -554,23 +574,53 @@ export function App({
     void submit(next, true);
   }, [busy, submit]);
 
+  /**
+   * Remember a prompt the user typed. Only this path records: replayed queue
+   * items and the text Anvil generates for itself (an approved plan, `-p`) are
+   * not things the user would want to recall.
+   */
+  const recordPrompt = useCallback(
+    (text: string) => {
+      const value = text.trim();
+      if (!value) return;
+      setPromptHistory((prev) =>
+        prev.at(-1) === value ? prev : [...prev, value].slice(-MAX_HISTORY),
+      );
+      void appendPromptHistory(cwd, value).catch(() => {});
+    },
+    [cwd],
+  );
+
   const prompt = usePromptInput({
     busy,
     blocked:
       Boolean(pendingPermission) ||
       showConfig ||
       Boolean(sessionPicker) ||
+      Boolean(historyPicker) ||
       planReview?.phase === "ready",
     editorMode: config.ui.editorMode,
     editor: config.ui.editor,
     cwd,
     suspendTerminal,
-    onSubmit: (text) => void submit(text),
+    onSubmit: (text) => {
+      recordPrompt(text);
+      void submit(text);
+    },
     onAbort: () => abortRef.current?.abort(),
     onToggleAgentMode: toggleMode,
     allowModeToggle: !planReview,
     onPasteNotice: (msg) => push({ kind: "status", id: nextId("s"), text: msg }),
-    isActive: !showConfig && !pendingPermission && !sessionPicker,
+    isActive:
+      !showConfig && !pendingPermission && !sessionPicker && !historyPicker,
+    initialHistory: promptHistory,
+    onHistoryRecall: () => {
+      const entries = promptHistoryRef.current;
+      if (entries.length === 0) return false;
+      // Opens on the most recent prompt — the same one a bare ↑ would recall.
+      setHistoryPicker({ entries, selected: entries.length - 1 });
+      return true;
+    },
   });
 
   /** Swap the live conversation for an earlier one, transcript and all. */
@@ -616,6 +666,7 @@ export function App({
   useEffect(() => {
     (async () => {
       commitWelcome(renderer, { cwd, model: configRef.current.model });
+      setPromptHistory(await loadPromptHistory(cwd));
       const loaded = await session.loadMessages();
       messagesRef.current = loaded;
       const transcript = await session.loadTimeline();
@@ -645,8 +696,12 @@ export function App({
   const pickerExtra =
     (prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0) +
     (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0) +
-    (sessionPicker ? sessionPickerRows(sessionPicker.sessions) : 0);
+    (sessionPicker ? sessionPickerRows(sessionPicker.sessions) : 0) +
+    (historyPicker ? historyPickerRows(historyPicker.entries.length) : 0);
   const spinnerRows = busy ? workingHeight() : 0;
+  // Reasoning and prose stream here while the turn runs; the finished message
+  // is committed to scrollback and the preview collapses back to nothing.
+  const liveRows = busy ? liveOutputRows(thinking, streaming, columns || 80) : 0;
   // What the approval prompt may occupy before the pinned region would swallow
   // the screen and push its own options out of view.
   // Measured against the real terminal, not `rows`: in split-footer mode the
@@ -655,7 +710,7 @@ export function App({
   const screenRows = renderer.terminalHeight || 24;
   const permissionMaxRows = Math.max(
     MIN_PERMISSION_ROWS,
-    screenRows - footerHeight() - spinnerRows - pickerExtra - MIN_TRANSCRIPT_ROWS,
+    screenRows - footerHeight() - spinnerRows - liveRows - pickerExtra - MIN_TRANSCRIPT_ROWS,
   );
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80, permissionMaxRows)
@@ -665,7 +720,7 @@ export function App({
         vimExtra +
         pasteExtra +
         planDenyExtra;
-  const inputRows = inputContent + 2 + pickerExtra + spinnerRows;
+  const inputRows = inputContent + 2 + pickerExtra + spinnerRows + liveRows;
   const footerState = {
     busy,
     editorMode: config.ui.editorMode,
@@ -673,6 +728,7 @@ export function App({
     showConfig,
     filePicker: Boolean(prompt.filePicker),
     commandPicker: Boolean(prompt.commandPicker),
+    historyPicker: Boolean(historyPicker),
     planReview: planReview?.phase,
     queued,
   };
@@ -715,6 +771,28 @@ export function App({
       return;
     }
     if (exitArmed) setExitArmed(false);
+
+    if (historyPicker) {
+      const count = historyPicker.entries.length;
+      if (key.name === "escape") {
+        setHistoryPicker(null);
+      } else if (key.name === "up" || key.name === "down") {
+        if (count > 0) {
+          const delta = key.name === "up" ? -1 : 1;
+          setHistoryPicker({
+            ...historyPicker,
+            selected: (historyPicker.selected + delta + count) % count,
+          });
+        }
+      } else if (key.name === "return") {
+        const chosen = historyPicker.entries[historyPicker.selected];
+        setHistoryPicker(null);
+        // Fill the prompt rather than sending it: a recalled prompt is
+        // usually the starting point for an edit, not the message itself.
+        if (chosen) prompt.setValue(chosen);
+      }
+      return;
+    }
 
     if (sessionPicker) {
       if (key.name === "escape") {
@@ -820,6 +898,9 @@ export function App({
       ) : (
         <>
           {busy ? (
+            <LiveOutput thinking={thinking} streaming={streaming} columns={columns || 80} />
+          ) : null}
+          {busy ? (
             <Working
               startedAt={startedAt}
               tokens={contextTokens}
@@ -838,6 +919,13 @@ export function App({
             <CommandPicker
               matches={prompt.commandPicker.matches}
               selected={prompt.commandPicker.selected}
+              columns={columns || 80}
+            />
+          ) : null}
+          {historyPicker ? (
+            <HistoryPicker
+              entries={historyPicker.entries}
+              selected={historyPicker.selected}
               columns={columns || 80}
             />
           ) : null}

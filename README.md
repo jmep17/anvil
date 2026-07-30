@@ -110,7 +110,7 @@ Enter `/` to open a completion menu. The same commands work in the TUI and the R
 | `@` | Reference a file (fuzzy picker over the project; `@~/…`, `@/…` or `@../…` browses outside it) |
 | `/` | Slash-command menu; Tab completes |
 | Ctrl+J / Shift+Enter | Insert newline |
-| ↑ / ↓ | Recall previous prompts (moves the cursor inside a multi-line draft) |
+| ↑ / ↓ | Recall previous prompts — ↑ on an empty prompt lists them (moves the cursor inside a multi-line draft) |
 | Home / End, Ctrl+A / Ctrl+E | Line start / end |
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
 | Ctrl+O | Expand or summarize tool output from here on |
@@ -120,6 +120,17 @@ Enter `/` to open a completion menu. The same commands work in the TUI and the R
 | ↑↓ + Enter, or 1 / 2 / 3 | Answer an approval prompt: allow once / don't ask again for this file or command / deny |
 
 Paste inserts at the cursor (bracketed paste). Large pastes show a short status notice.
+
+Prompts you submit are remembered per project (`~/.anvil/projects/<hash>/history`),
+so ↑ still finds them after a restart. Pressing ↑ on an empty prompt opens a picker
+over the whole history; Enter fills the prompt with the one you chose rather than
+sending it, so it can be edited first.
+
+While a turn is running, the model's reasoning and its answer stream into the pinned
+region as they arrive, and the finished message is committed to the scrollback
+transcript as formatted markdown. Reasoning models served over an OpenAI-compatible
+endpoint usually emit their chain of thought inline, wrapped in `<think>` tags; Anvil
+separates it out, so it shows as thinking rather than being printed as the answer.
 
 Write and Edit actions are restricted to the project directory by default, including
 symlink-aware checks. Approval prompts show a syntax-highlighted unified diff of

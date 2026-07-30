@@ -11,6 +11,7 @@ export interface FooterState {
   showConfig?: boolean;
   filePicker?: boolean;
   commandPicker?: boolean;
+  historyPicker?: boolean;
   planReview?: "ready" | "denying";
   queued?: number;
 }
@@ -34,12 +35,14 @@ export function footerHint({
   showConfig,
   filePicker,
   commandPicker,
+  historyPicker,
   planReview,
   queued,
 }: FooterState): string {
   if (showConfig) return "↑↓ navigate · enter edit · esc close";
   if (planReview === "ready") return "[a] approve & implement · [d] decline with feedback";
   if (planReview === "denying") return "describe changes · enter revise · esc back";
+  if (historyPicker) return "↑↓ prompts · enter use · esc dismiss";
   if (filePicker) return "↑↓ files · tab select · esc dismiss";
   if (commandPicker) return "↑↓ commands · tab complete · esc dismiss";
   if (busy) {

@@ -44,6 +44,64 @@ function config() {
   };
 }
 
+function completionChunk(delta: Record<string, unknown>): string {
+  return `data: ${JSON.stringify({
+    id: "chunk",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "test-model",
+    choices: [{ index: 0, delta, finish_reason: null }],
+  })}\n\n`;
+}
+
+/**
+ * A stand-in for LM Studio that streams `pieces` slowly enough for the pinned
+ * region to be sampled mid-turn, then holds the connection open.
+ */
+function serveModel(pieces: string[]): ReturnType<typeof Bun.serve> {
+  return Bun.serve({
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname.endsWith("/models")) {
+        return Response.json({ data: [{ id: "test-model" }] });
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          for (const piece of pieces) {
+            controller.enqueue(encoder.encode(completionChunk({ content: piece })));
+            await Bun.sleep(60);
+          }
+          // Deliberately never closed: the turn stays in flight so the live
+          // preview is what the frame shows.
+        },
+      });
+      return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+    },
+  });
+}
+
+/**
+ * `waitForFrame` counts render passes, not time, so it exhausts its budget in
+ * milliseconds — no use for anything waiting on a socket. This samples the
+ * pinned region against the clock instead.
+ */
+async function pollFrame(
+  setup: { renderOnce: () => Promise<void>; captureCharFrame: () => string },
+  predicate: (frame: string) => boolean,
+  timeoutMs = 15_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let frame = "";
+  while (Date.now() < deadline) {
+    await Bun.sleep(25);
+    await setup.renderOnce();
+    frame = setup.captureCharFrame();
+    if (predicate(frame)) return frame;
+  }
+  throw new Error(`timed out waiting for frame; last frame:\n${frame}`);
+}
+
 describe("App", () => {
   test("boots with a welcome block, a prompt and a status footer", async () => {
     const session = await SessionStore.create(cwd);
@@ -90,4 +148,50 @@ describe("App", () => {
       renderer.destroy();
     }
   });
+
+  test("reasoning streams into the pinned region while the turn runs", async () => {
+    const server = serveModel(["<think>", "weighing the options", " carefully"]);
+    const session = await SessionStore.create(cwd);
+    const setup = await testRender(
+      <App
+        config={{ ...config(), baseURL: `http://localhost:${server.port}/v1` }}
+        cwd={cwd}
+        session={session}
+        yes
+        initialPrompt="hello"
+      />,
+      SPLIT,
+    );
+    const { renderer } = setup;
+    try {
+      const frame = await pollFrame(setup, (f) => f.includes("weighing the options"));
+      expect(frame).toContain("Thinking");
+    } finally {
+      renderer.destroy();
+      server.stop(true);
+    }
+  }, 20_000);
+
+  test("streamed prose replaces the reasoning preview", async () => {
+    const server = serveModel(["<think>secret reasoning</think>", "the visible answer"]);
+    const session = await SessionStore.create(cwd);
+    const setup = await testRender(
+      <App
+        config={{ ...config(), baseURL: `http://localhost:${server.port}/v1` }}
+        cwd={cwd}
+        session={session}
+        yes
+        initialPrompt="hello"
+      />,
+      SPLIT,
+    );
+    const { renderer } = setup;
+    try {
+      const frame = await pollFrame(setup, (f) => f.includes("the visible answer"));
+      expect(frame).not.toContain("secret reasoning");
+    } finally {
+      renderer.destroy();
+      server.stop(true);
+    }
+  }, 20_000);
 });

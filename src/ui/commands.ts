@@ -63,7 +63,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ["ctrl+c", "press twice to exit"],
   ["ctrl+o", "expand or summarize tool output from here on"],
   ["ctrl+g", "edit the prompt in $EDITOR"],
-  ["↑ / ↓", "recall previous prompts"],
+  ["↑ / ↓", "recall previous prompts (↑ on an empty prompt lists them)"],
 ];
 
 export function helpText(): string {

@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { extractReasoningMiddleware, wrapLanguageModel } from "ai";
 import type { AnvilConfig } from "../config/types.ts";
 
 export function createModel(config: AnvilConfig) {
@@ -8,7 +9,16 @@ export function createModel(config: AnvilConfig) {
     name: "lmstudio",
   });
   // Use chat completions API — LM Studio's OpenAI-compatible endpoint
-  return provider.chat(config.model);
+  return wrapLanguageModel({
+    model: provider.chat(config.model),
+    // Reasoning models served over the OpenAI-compatible endpoint emit their
+    // chain of thought inline, wrapped in <think>…</think>, rather than as a
+    // separate reasoning part. Without this the whole thing arrives as ordinary
+    // text: nothing streams as thinking, and the reasoning ends up printed in
+    // the transcript as if it were the answer. Models that emit no such tag are
+    // passed through untouched.
+    middleware: extractReasoningMiddleware({ tagName: "think" }),
+  });
 }
 
 export async function probeServer(config: AnvilConfig): Promise<{ ok: boolean; detail: string }> {
