@@ -18,8 +18,8 @@ import {
 import { createPlanHarnessTools } from "../tools/plan.ts";
 import { toolOutputBudget, type PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
-import { describeNow } from "./datetime.ts";
-import { nextStepNudge, withNudge } from "./discipline.ts";
+import { describeToday, formatTimeOfDay } from "./datetime.ts";
+import { currentTimeNote, nextStepNudge, withNudge } from "./discipline.ts";
 import { createModel } from "./model.ts";
 import {
   PlanHarness,
@@ -225,8 +225,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const system = buildSystemPrompt({
     cwd: opts.cwd,
     mode: opts.config.mode,
-    // Rebuilt per turn, so a long session does not drift out of date.
-    now: describeNow(new Date(), opts.config.timezone),
+    // Date only. This is the prompt prefix a local server caches its KV state
+    // against, so it must stay byte-identical for as long as possible; the
+    // exact time rides along at the end of the messages instead.
+    today: describeToday(new Date(), opts.config.timezone),
     skills,
     repoContext: repo.combined,
     detectedStack,
@@ -271,16 +273,20 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     // agent hanging. Per-step guidance is appended to the messages instead,
     // where it only costs the new tokens.
     prepareStep: ({ steps, messages: stepMessages }) => {
+      const timeOfDay = formatTimeOfDay(new Date(), opts.config.timezone);
       const planControl = planHarness?.nextStep();
       if (planControl) {
         opts.onEvent?.({ type: "status", message: `plan · ${planControl.stage.replace(/_/g, " ")}` });
         return {
           activeTools: planHarnessTools(tools, planControl),
-          messages: withNudge(stepMessages, `Plan harness stage: ${planControl.instruction}`),
+          messages: withNudge(
+            stepMessages,
+            `${currentTimeNote(timeOfDay)}\n\nPlan harness stage: ${planControl.instruction}`,
+          ),
         };
       }
       const pauseRead = shouldPauseReadTool(steps);
-      const nudge = nextStepNudge(Boolean(steps.at(-1)?.toolCalls.length));
+      const nudge = nextStepNudge(Boolean(steps.at(-1)?.toolCalls.length), timeOfDay);
 
       if (pauseRead) {
         opts.onEvent?.({

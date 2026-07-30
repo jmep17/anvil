@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_TIMEZONE,
   describeNow,
+  describeToday,
   formatDateTime,
+  formatTimeOfDay,
   isValidTimeZone,
   isoDate,
   resolveTimeZone,
@@ -107,5 +109,42 @@ describe("describeNow", () => {
 
   test("never throws on a bad zone", () => {
     expect(() => describeNow(SUMMER, "not/a/zone")).not.toThrow();
+  });
+});
+
+/**
+ * `describeToday` is the string that goes into the system prompt, which is the
+ * prompt prefix a local server caches its KV state against. If it changed with
+ * the clock, almost every turn would arrive with a different prefix and force
+ * the whole context to be re-encoded before generation could start.
+ */
+describe("describeToday", () => {
+  test("holds steady across a whole day", () => {
+    const morning = new Date("2026-07-30T06:00:00Z");
+    const evening = new Date("2026-07-30T21:30:00Z");
+    expect(describeToday(morning, DEFAULT_TIMEZONE)).toBe(
+      describeToday(evening, DEFAULT_TIMEZONE),
+    );
+  });
+
+  test("carries no time of day at all", () => {
+    const text = describeToday(SUMMER, DEFAULT_TIMEZONE);
+    expect(text).toContain("Thursday, 30 July 2026");
+    expect(text).toContain("2026-07-30");
+    expect(text).toContain("Europe/London");
+    expect(text).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  test("still turns over at local midnight, not UTC midnight", () => {
+    // 23:30 UTC in summer is 00:30 the next day in British Summer Time.
+    const lateUtc = new Date("2026-07-30T23:30:00Z");
+    expect(describeToday(lateUtc, DEFAULT_TIMEZONE)).toContain("2026-07-31");
+  });
+});
+
+describe("formatTimeOfDay", () => {
+  test("is the part that changes, named with its zone", () => {
+    expect(formatTimeOfDay(SUMMER, DEFAULT_TIMEZONE)).toBe("17:42 (BST, UTC+01:00)");
+    expect(formatTimeOfDay(WINTER, DEFAULT_TIMEZONE)).toBe("09:05 (GMT, UTC)");
   });
 });

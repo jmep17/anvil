@@ -85,9 +85,18 @@ rather than painting its own.
 
 ### Date and time
 
-The model has no clock, and its training cutoff is not "now". Every turn's system
-prompt carries the current date and time, so anything time-relative ("today",
-"how old is this release") is grounded rather than guessed. It defaults to UK time
+The model has no clock, and its training cutoff is not "now". The system prompt
+carries today's date and each step carries the exact time, so anything time-relative
+("today", "how old is this release") is grounded rather than guessed.
+
+The split is deliberate. The system prompt is the prompt prefix, and a local server
+keeps its cached KV state only while that prefix is byte-identical — a timestamp
+accurate to the minute meant nearly every turn arrived with a different prefix and
+forced the whole context to be re-encoded before a single token came back. On a large
+context window that is minutes of silence per turn. The date holds for a day; the time
+rides at the end of the messages, where it costs only its own tokens.
+
+It defaults to UK time
 and follows GMT/BST automatically; set `timezone` to any IANA zone, or to `auto`
 to follow the host. `/status` shows what it currently thinks the time is.
 

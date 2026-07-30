@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SKILLS_CONFIG } from "../config/types.ts";
 import type { SkillInfo } from "../skills/types.ts";
+import { DEFAULT_TIMEZONE, describeToday } from "./datetime.ts";
 import { buildSystemPrompt } from "./system.ts";
 
 const sampleSkills: SkillInfo[] = [
@@ -27,7 +28,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "build",
-      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
+      today: "Thursday, 30 July 2026 · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "Project instructions (ANVIL.md):\nUse Bun.",
       detectedStack: ["next", "shadcn"],
@@ -48,7 +49,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "plan",
-      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
+      today: "Thursday, 30 July 2026 · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],
@@ -66,7 +67,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "plan",
-      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
+      today: "Thursday, 30 July 2026 · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],
@@ -89,7 +90,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "build",
-      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
+      today: "Thursday, 30 July 2026 · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],
@@ -99,5 +100,46 @@ describe("buildSystemPrompt", () => {
     });
     expect(prompt).not.toContain("PlanRoute");
     expect(prompt).not.toContain("SubmitPlan");
+  });
+});
+
+/**
+ * The system prompt is the prompt prefix, and a local inference server keeps
+ * its cached KV state only while that prefix is byte-identical. Anything in
+ * here that moves with the clock costs a full re-encode of the whole context —
+ * prompt, tool schemas and conversation — before a single token comes back.
+ */
+describe("the system prompt as a cache prefix", () => {
+  const build = (at: Date) =>
+    buildSystemPrompt({
+      cwd: "/tmp/app",
+      mode: "build",
+      today: describeToday(at, DEFAULT_TIMEZONE),
+      skills: sampleSkills,
+      repoContext: "Project instructions (ANVIL.md):\nUse Bun.",
+      detectedStack: ["next"],
+      recommendedSkills: ["shadcn"],
+      injectedSkills: "",
+      skillsConfig: { ...DEFAULT_SKILLS_CONFIG },
+    });
+
+  test("is identical for two turns on the same day", () => {
+    // Minutes apart, and hours apart: neither may change a single byte.
+    expect(build(new Date("2026-07-30T16:42:00Z"))).toBe(
+      build(new Date("2026-07-30T16:43:00Z")),
+    );
+    expect(build(new Date("2026-07-30T06:00:00Z"))).toBe(
+      build(new Date("2026-07-30T21:30:00Z")),
+    );
+  });
+
+  test("contains no clock time anywhere", () => {
+    expect(build(new Date("2026-07-30T16:42:00Z"))).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  test("does still turn over to the next day", () => {
+    expect(build(new Date("2026-07-30T12:00:00Z"))).not.toBe(
+      build(new Date("2026-07-31T12:00:00Z")),
+    );
   });
 });

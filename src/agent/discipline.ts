@@ -19,9 +19,21 @@ export const DECISION_CHECKPOINT = `Decision checkpoint for this step:
 - Keep the prior decision unless this new evidence directly contradicts it.
 - Take the next atomic action now; do not restart exploration or narrate a reversal.`;
 
-/** The nudge to append after a tool result, or null when none is warranted. */
-export function nextStepNudge(followedToolCall: boolean): string | null {
-  return followedToolCall ? DECISION_CHECKPOINT : null;
+/**
+ * The exact time, carried here rather than in the system prompt for the reason
+ * above: the prompt is the prefix, and a stamp accurate to the minute changed
+ * it on almost every turn.
+ */
+export function currentTimeNote(timeOfDay: string): string {
+  return `Current time: ${timeOfDay}.`;
+}
+
+/** The transient guidance appended for this step. */
+export function nextStepNudge(followedToolCall: boolean, timeOfDay?: string): string | null {
+  const parts: string[] = [];
+  if (timeOfDay) parts.push(currentTimeNote(timeOfDay));
+  if (followedToolCall) parts.push(DECISION_CHECKPOINT);
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 /**
