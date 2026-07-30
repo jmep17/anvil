@@ -39,7 +39,7 @@ bun run anvil -- -p -y "list files and summarize README.md"
 | Tool | Purpose |
 |------|---------|
 | Read / Write / Edit | File operations |
-| Glob / Grep | Find files and search contents |
+| Glob / Grep | Find files and search contents (Grep supports content / files / count modes and context lines) |
 | Bash | Shell commands (permission-gated) |
 | WebSearch / WebFetch | Online docs and research |
 | TodoWrite | Task checklist |
@@ -52,31 +52,50 @@ bun run anvil -- -p -y "list files and summarize README.md"
 - **build** (default): full tools with permission prompts for Write/Edit/Bash
 - **plan**: read-only (no Write/Edit/Bash) — `/mode plan`. Anvil first classifies the request, then gathers a repository search result and direct file evidence before it can submit a structured **PLAN FOR REVIEW**. If a decision-critical detail is missing, it asks one clarification instead. Approve switches to build mode and implements the validated plan; decline requests a revision.
 
-Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal alternate screen (fullscreen).
+Esc (or Ctrl+C) interrupts a running turn in the TUI, killing any command it spawned.
+The interactive TUI uses the terminal alternate screen (fullscreen) and inherits your
+terminal's background rather than painting its own.
+
+### Slash commands
+
+Enter `/` to open a completion menu. The same commands work in the TUI and the REPL.
+
+| Command | Action |
+|---------|--------|
+| `/help` | Commands and keyboard shortcuts |
+| `/clear` | Clear the transcript and start a fresh context |
+| `/compact` | Summarize the conversation to free up context |
+| `/status` | Model, mode, context usage, session id |
+| `/mode plan\|build` | Switch modes |
+| `/config` | Interactive settings panel (TUI only) |
+| `/retry` | Recheck the configured model server after an offline error |
+| `/exit` | Leave Anvil |
 
 ### TUI keybinds
 
 | Key | Action |
 |-----|--------|
-| Enter | Send message |
+| Enter | Send message (queued if the agent is still working) |
 | `@` | Reference a project file (fuzzy picker; contents inlined on send) |
+| `/` | Slash-command menu; Tab completes |
 | Ctrl+J / Shift+Enter | Insert newline |
-| Arrow keys / Home / End | Move cursor in the prompt |
-| Ctrl+A / Ctrl+E | Line start / end |
+| ↑ / ↓ | Recall previous prompts (moves the cursor inside a multi-line draft) |
+| Home / End, Ctrl+A / Ctrl+E | Line start / end |
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
-| Esc | Interrupt (busy); dismiss `@` picker; in Vim insert → normal; otherwise clear input |
+| Ctrl+O | Expand or collapse tool output |
+| Esc | Interrupt (busy); dismiss a picker; in Vim insert → normal; otherwise clear input |
+| Ctrl+C | Interrupt while busy; otherwise press twice to exit |
 | PgUp / PgDn | Browse the full transcript; PgDn returns to live output |
 | Shift+Tab | Toggle plan ↔ build (disabled while a plan is awaiting review) |
-| a / A / d | Allow once / allow the exact same action for this session / deny; when a plan is under review, `a` approves and implements it, while `d` requests feedback for a revision |
-| `/config` | Interactive settings panel (model, editor mode, …) |
-| `/retry` | Recheck the configured model server after an offline error |
+| ↑↓ + Enter, or 1 / 2 / 3 | Answer an approval prompt: allow once / don't ask again for this file or command / deny |
 
 Paste inserts at the cursor (bracketed paste). Large pastes show a short status notice.
 
 Write and Edit actions are restricted to the project directory by default, including
-symlink-aware checks. Approval prompts show a compact content/diff preview before
-the action runs. Resumed TUI sessions restore their visual transcript when it is
-available; older sessions still retain their model conversation context.
+symlink-aware checks. Approval prompts show a syntax-highlighted unified diff of
+exactly what will change before the action runs. Resumed TUI sessions restore their
+visual transcript when it is available; older sessions still retain their model
+conversation context.
 
 **Vim mode** (`ui.editorMode: "vim"` via `/config` or `anvil config set ui.editorMode vim`): Esc enters normal mode (`hjkl`, `i`/`a`/`I`/`A`, `x`, `dd`, `w`/`b`, `o`/`O`).
 
