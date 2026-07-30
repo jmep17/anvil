@@ -47,7 +47,6 @@ export type PlanStage =
 export interface PlanStepControl {
   stage: PlanStage;
   activeTools: string[];
-  toolChoice: "required" | { type: "tool"; toolName: string };
   instruction: string;
 }
 
@@ -115,7 +114,6 @@ export class PlanHarness {
         return {
           stage: "routing",
           activeTools: ["PlanRoute"],
-          toolChoice: { type: "tool", toolName: "PlanRoute" },
           instruction:
             "Classify the request now. Ask one clarification only when a decision-critical requirement is missing; otherwise state the implementation goal and success criteria.",
         };
@@ -126,7 +124,6 @@ export class PlanHarness {
         return {
           stage: "finding_evidence",
           activeTools: ["Glob", "Grep"],
-          toolChoice: "required",
           instruction:
             "Find relevant repository evidence with Glob or Grep. Do not draft a plan yet.",
         };
@@ -134,7 +131,6 @@ export class PlanHarness {
         return {
           stage: "reading_evidence",
           activeTools: ["Read"],
-          toolChoice: { type: "tool", toolName: "Read" },
           instruction:
             "Read one file identified by the search result. Do not draft a plan yet.",
         };
@@ -142,7 +138,6 @@ export class PlanHarness {
         return {
           stage: "composing_plan",
           activeTools: ["SubmitPlan"],
-          toolChoice: { type: "tool", toolName: "SubmitPlan" },
           instruction:
             "Use SubmitPlan now. Populate every field from the request and the repository evidence; do not emit prose instead.",
         };

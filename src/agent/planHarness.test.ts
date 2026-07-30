@@ -23,7 +23,7 @@ describe("PlanHarness", () => {
 
     harness.recordEvidence("Read", { path: "src/agent/loop.ts" });
     expect(harness.nextStep()?.stage).toBe("composing_plan");
-    expect(harness.nextStep()?.toolChoice).toEqual({ type: "tool", toolName: "SubmitPlan" });
+    expect(harness.nextStep()?.activeTools).toEqual(["SubmitPlan"]);
 
     harness.submit(proposal);
     expect(harness.isComplete).toBe(true);

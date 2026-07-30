@@ -186,7 +186,6 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         opts.onEvent?.({ type: "status", message: `plan · ${planControl.stage.replace(/_/g, " ")}` });
         return {
           activeTools: planHarnessTools(tools, planControl),
-          toolChoice: planControl.toolChoice,
           instructions: `${system}\n\nPlan harness stage: ${planControl.instruction}`,
         };
       }
