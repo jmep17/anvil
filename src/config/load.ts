@@ -11,7 +11,8 @@ import {
 } from "./types.ts";
 
 export function anvilHome(): string {
-  return join(homedir(), ".anvil");
+  if (process.env.ANVIL_HOME) return process.env.ANVIL_HOME;
+  return join(process.env.HOME || process.env.USERPROFILE || homedir(), ".anvil");
 }
 
 export function projectSettingsPath(cwd: string): string {

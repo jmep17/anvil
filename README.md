@@ -56,13 +56,25 @@ Esc interrupts a running turn in the TUI.
 
 ## Config
 
-`~/.anvil/config.json`:
+Prefer the CLI (writes `~/.anvil/config.json` by default):
+
+```bash
+anvil config                          # effective values + which file won
+anvil config set model qwen/qwen3.6-27b
+anvil config set contextLength 65536
+anvil config unset model --project    # stop a repo from overriding global
+anvil config edit                     # open global config in $EDITOR
+```
+
+Precedence: **default → global → project → env → CLI (`-m`)**.
+
+Example `~/.anvil/config.json`:
 
 ```json
 {
   "baseURL": "http://localhost:1234/v1",
-  "model": "qwen/qwen3.5-9b",
-  "contextLength": 16384,
+  "model": "qwen/qwen3.6-27b",
+  "contextLength": 65536,
   "maxSteps": 40,
   "skills": {
     "autoDetect": true,
@@ -86,7 +98,7 @@ Esc interrupts a running turn in the TUI.
 }
 ```
 
-Project overrides: `.anvil/settings.json`
+Project overrides (optional): `.anvil/settings.json`
 
 | Path | Purpose |
 |------|---------|
@@ -137,6 +149,8 @@ anvil --repl              # classic readline REPL
 anvil -p "prompt"         # one-shot (implies -y)
 anvil --mode plan
 anvil -m <model>
+anvil config
+anvil config set model <id>
 anvil --resume <session-id>
 anvil --base-url http://localhost:1234/v1
 ```
