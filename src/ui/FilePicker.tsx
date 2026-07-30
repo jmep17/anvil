@@ -45,13 +45,13 @@ export function FilePicker({
       {matches.map((path, index) => {
         const active = index === selected;
         const label = path.length > width - 2 ? `…${path.slice(-(width - 3))}` : path;
+        // Explicit fg/bg (not INVERSE): inverse + light magenta often yields unreadable contrast.
         return (
           <text
             key={path}
-            fg={active ? colors.magenta : colors.text}
-            attributes={
-              active ? TextAttributes.BOLD | TextAttributes.INVERSE : TextAttributes.NONE
-            }
+            fg={active ? colors.selectionFg : colors.text}
+            bg={active ? colors.selectionBg : undefined}
+            attributes={active ? TextAttributes.BOLD : TextAttributes.NONE}
           >
             {`${active ? "› " : "  "}${label}`}
           </text>

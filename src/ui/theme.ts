@@ -15,6 +15,9 @@ export const colors = {
   heading: "#58a6ff",
   list: "#ff7b72",
   quote: "#8b949e",
+  /** High-contrast selection (e.g. file picker highlight). */
+  selectionBg: "#a855f7",
+  selectionFg: "#0f172a",
 } as const;
 
 let markdownStyle: SyntaxStyle | null = null;
