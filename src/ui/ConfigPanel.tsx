@@ -217,8 +217,8 @@ export function ConfigPanel({
       width="100%"
       flexShrink={0}
     >
-      <text fg={colors.cyan} attributes={TextAttributes.BOLD}>
-        /config
+      <text fg={colors.purple} attributes={TextAttributes.BOLD}>
+        CONFIGURATION
       </text>
       <text fg={colors.muted} attributes={TextAttributes.DIM}>
         ↑/↓ select · Enter edit/toggle · Esc close · saves to ~/.anvil/config.json
@@ -231,24 +231,28 @@ export function ConfigPanel({
           const active = i === selected;
           const val = displayValue(config, f.id);
           return (
-            <box key={f.id} flexDirection="row">
+            <box
+              key={f.id}
+              flexDirection="row"
+              backgroundColor={active ? colors.selectionBg : undefined}
+            >
               <text
-                fg={active ? colors.green : colors.text}
-                attributes={active && !editing ? TextAttributes.INVERSE : TextAttributes.NONE}
+                fg={active ? colors.selectionFg : colors.text}
+                attributes={active ? TextAttributes.BOLD : TextAttributes.NONE}
               >
                 {`${active ? "› " : "  "}${f.label.padEnd(16)}`}
               </text>
               {editing && active ? (
-                <text fg={colors.yellow}>
+                <text fg={colors.selectionFg} attributes={TextAttributes.BOLD}>
                   {draft}
-                  <span fg={colors.muted} attributes={TextAttributes.DIM}>
+                  <span fg={colors.selectionFg} attributes={TextAttributes.DIM}>
                     █
                   </span>
                 </text>
               ) : (
                 <text
-                  fg={active ? colors.text : colors.muted}
-                  attributes={active ? TextAttributes.NONE : TextAttributes.DIM}
+                  fg={active ? colors.selectionFg : colors.muted}
+                  attributes={active ? TextAttributes.BOLD : TextAttributes.DIM}
                 >
                   {val}
                 </text>
