@@ -55,8 +55,45 @@ describe("buildSystemPrompt", () => {
       skillsConfig: { ...DEFAULT_SKILLS_CONFIG },
     });
     expect(prompt).toContain("read-only");
-    expect(prompt).toContain("PlanRoute → repository search → file read → SubmitPlan");
+    expect(prompt).toContain("PlanRoute");
     expect(prompt).toContain("Loaded skills (always/auto)");
     expect(prompt).toContain("### Skill: docs");
+  });
+
+  test("plan mode distinguishes reviewing from planning a change", () => {
+    const prompt = buildSystemPrompt({
+      cwd: "/tmp/app",
+      mode: "plan",
+      skills: sampleSkills,
+      repoContext: "",
+      detectedStack: [],
+      recommendedSkills: [],
+      injectedSkills: "",
+      skillsConfig: { ...DEFAULT_SKILLS_CONFIG },
+    });
+
+    // A review request must be answered, not turned into a plan to review.
+    expect(prompt).toContain("**review**");
+    expect(prompt).toContain("Do not call SubmitPlan");
+    expect(prompt).toContain("never produce a plan describing how you would review");
+    expect(prompt).toContain("**research**");
+    expect(prompt).toContain("**clarify**");
+    // And the model should not add its own list markers on top of ours.
+    expect(prompt).toContain('do not start an item with "1." or "-"');
+  });
+
+  test("build mode carries no plan-route instructions", () => {
+    const prompt = buildSystemPrompt({
+      cwd: "/tmp/app",
+      mode: "build",
+      skills: sampleSkills,
+      repoContext: "",
+      detectedStack: [],
+      recommendedSkills: [],
+      injectedSkills: "",
+      skillsConfig: { ...DEFAULT_SKILLS_CONFIG },
+    });
+    expect(prompt).not.toContain("PlanRoute");
+    expect(prompt).not.toContain("SubmitPlan");
   });
 });

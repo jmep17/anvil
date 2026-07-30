@@ -5,8 +5,16 @@ export interface PlanClarification {
   reason: string;
 }
 
+/**
+ * - `research` — the user wants something changed, so the deliverable is an
+ *   implementation plan to approve.
+ * - `review` — the user wants existing code assessed, explained or audited.
+ *   The deliverable is the findings themselves; forcing a plan here answers
+ *   "how I would review this" instead of doing the review.
+ * - `clarify` — a decision-critical requirement is missing.
+ */
 export interface PlanRoute {
-  kind: "research" | "clarify";
+  kind: "research" | "review" | "clarify";
   goal?: string;
   successCriteria?: string[];
   clarification?: PlanClarification;
@@ -39,10 +47,21 @@ export interface ReviewedPlan {
 export type PlanStage =
   | "routing"
   | "clarifying"
+  | "reviewing"
   | "finding_evidence"
   | "reading_evidence"
   | "composing_plan"
   | "complete";
+
+/** Searches required before the harness will let a plan be drafted. */
+const MIN_SEARCHES = 1;
+/** Files that must be read before drafting. One is not a basis for a plan. */
+const MIN_READS = 2;
+/**
+ * Past this much evidence the harness stops offering more investigation and
+ * insists on a plan, so a model that likes looking around cannot loop.
+ */
+const EVIDENCE_BUDGET = 14;
 
 export interface PlanStepControl {
   stage: PlanStage;
@@ -97,13 +116,24 @@ export class PlanHarness {
     return Boolean(this.clarification || this.reviewedPlan);
   }
 
+  /**
+   * Whether this turn owes the user a structured plan. A review answers in
+   * prose, so its turn ending without a SubmitPlan is success, not failure.
+   */
+  get expectsPlan(): boolean {
+    return this.routeValue === null || this.routeValue.kind === "research";
+  }
+
+  private count(...tools: PlanEvidence["tool"][]): number {
+    return this.evidenceValue.filter((item) => tools.includes(item.tool)).length;
+  }
+
   get stage(): PlanStage {
     if (!this.routeValue) return "routing";
     if (this.clarification) return "clarifying";
-    if (!this.evidenceValue.some((item) => item.tool === "Glob" || item.tool === "Grep")) {
-      return "finding_evidence";
-    }
-    if (!this.evidenceValue.some((item) => item.tool === "Read")) return "reading_evidence";
+    if (this.routeValue.kind === "review") return "reviewing";
+    if (this.count("Glob", "Grep") < MIN_SEARCHES) return "finding_evidence";
+    if (this.count("Read") < MIN_READS) return "reading_evidence";
     if (!this.proposalValue) return "composing_plan";
     return "complete";
   }
@@ -115,39 +145,66 @@ export class PlanHarness {
           stage: "routing",
           activeTools: ["PlanRoute"],
           instruction:
-            "Classify the request now. Ask one clarification only when a decision-critical requirement is missing; otherwise state the implementation goal and success criteria.",
+            "Classify the request now. Choose review when the user asks you to review, audit, explain or assess existing code — the deliverable is your findings. Choose research when the user wants something changed and needs an implementation plan. Ask one clarification only when a decision-critical requirement is missing.",
         };
+      // The harness stops steering these: a clarification is already the
+      // answer, a review is answered in prose, and a submitted plan is done.
       case "clarifying":
+      case "reviewing":
       case "complete":
         return undefined;
       case "finding_evidence":
         return {
           stage: "finding_evidence",
-          activeTools: ["Grep"],
+          activeTools: ["Grep", "Glob"],
           instruction:
-            "Find relevant repository evidence with a targeted Grep. Do not draft a plan yet.",
+            "Locate the relevant code with a targeted Grep or Glob. Do not draft a plan yet.",
         };
       case "reading_evidence":
         return {
           stage: "reading_evidence",
-          activeTools: ["Read"],
-          instruction:
-            "Read one file identified by the search result. Do not draft a plan yet.",
+          // Searching stays available: reading one file usually reveals the
+          // next thing worth finding.
+          activeTools: ["Read", "Grep", "Glob"],
+          instruction: `Read the files the search identified — at least ${MIN_READS} before planning. Search again if a file points somewhere you have not looked. Do not draft a plan yet.`,
         };
-      case "composing_plan":
+      case "composing_plan": {
+        const exhausted = this.evidenceValue.length >= EVIDENCE_BUDGET;
         return {
           stage: "composing_plan",
-          activeTools: ["SubmitPlan"],
-          instruction:
-            "Use SubmitPlan now. Populate every field from the request and the repository evidence; do not emit prose instead.",
+          // Keep investigation available so a genuinely missing detail can be
+          // checked, rather than guessed at inside the plan.
+          activeTools: exhausted
+            ? ["SubmitPlan"]
+            : ["SubmitPlan", "Read", "Grep", "Glob"],
+          instruction: exhausted
+            ? "You have gathered enough evidence. Call SubmitPlan now; do not emit prose instead."
+            : "You have the minimum evidence for a plan. Call SubmitPlan now unless a decision-critical detail is still unverified — in that case check it first, then submit. Do not emit prose instead of SubmitPlan.",
         };
+      }
     }
   }
 }
 
+/**
+ * Models often number or bullet their own list items. Adding our marker on top
+ * of theirs produces "1. 1. do the thing", so strip any leading markers first.
+ * Requires trailing whitespace, so "1.5x faster" is left alone.
+ */
+export function stripListMarker(text: string): string {
+  let out = text.trim();
+  let previous: string;
+  do {
+    previous = out;
+    out = out.replace(/^(?:\d+[.)]|[-*•+]|[a-z][.)])\s+/i, "").trimStart();
+  } while (out !== previous && out.length > 0);
+  return out || text.trim();
+}
+
 export function formatReviewedPlan(plan: ReviewedPlan): string {
   const { proposal, evidence } = plan;
-  const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n");
+  const list = (items: string[]) =>
+    items.map((item) => `- ${stripListMarker(item)}`).join("\n");
   return [
     "## Summary",
     proposal.summary,
@@ -156,10 +213,10 @@ export function formatReviewedPlan(plan: ReviewedPlan): string {
     list(evidence.map((item) => `\`${item.tool}\` — \`${item.target}\``)),
     "",
     "## Changes",
-    list(proposal.changes.map((change) => `\`${change.path}\` — ${change.intent}`)),
+    list(proposal.changes.map((change) => `\`${change.path}\` — ${stripListMarker(change.intent)}`)),
     "",
     "## Implementation steps",
-    proposal.steps.map((step, index) => `${index + 1}. ${step}`).join("\n"),
+    proposal.steps.map((step, index) => `${index + 1}. ${stripListMarker(step)}`).join("\n"),
     "",
     "## Verification",
     list(proposal.verification),

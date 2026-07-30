@@ -143,9 +143,9 @@ export async function runRepl(opts: {
       for (const m of result.responseMessages) await opts.session.appendMessage(m);
       messages = result.messages;
       reviewedPlan = result.plan;
-      if (opts.config.mode === "plan" && result.plan) {
+      if (result.plan) {
         process.stdout.write(`${formatReviewedPlan(result.plan)}\n`);
-      } else if (opts.config.mode === "plan" && result.clarification) {
+      } else if (result.clarification) {
         process.stdout.write(`Clarification needed: ${result.clarification.question}\n`);
       } else if (result.text?.trim() && !streamed) {
         process.stdout.write(result.text);

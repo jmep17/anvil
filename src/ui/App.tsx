@@ -467,15 +467,17 @@ export function App({
         // into the pre-call array breaks as soon as compaction shortens the head.
         for (const m of result.responseMessages) await session.appendMessage(m);
         messagesRef.current = result.messages;
-        const isPlanMode = configRef.current.mode === "plan";
-        flushLive("assistant", !isPlanMode);
-        if (isPlanMode && result.plan) {
+        // Prose is only suppressed when something structured replaces it. A
+        // plan-mode review answers in prose and must not be swallowed.
+        const structured = Boolean(result.plan || result.clarification);
+        flushLive("assistant", !structured);
+        if (result.plan) {
           const planText = formatReviewedPlan(result.plan);
           push({ kind: "plan", id: nextId("p"), text: planText });
           setPlanReview({ plan: result.plan, phase: "ready" });
-        } else if (isPlanMode && result.clarification) {
+        } else if (result.clarification) {
           push({ kind: "clarification", id: nextId("q"), text: result.clarification.question });
-        } else if (!isPlanMode && !streamedAny && result.text?.trim()) {
+        } else if (!streamedAny && result.text?.trim()) {
           push({
             kind: "assistant",
             id: nextId("a"),

@@ -38,7 +38,12 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
 
   const planNudge =
     opts.mode === "plan"
-      ? "\n- In plan mode, follow the enforced PlanRoute → repository search → file read → SubmitPlan workflow. Never present prose as a plan. PlanRoute may ask one concise clarification only for a decision-critical missing requirement. SubmitPlan is the only way to send a plan for approval."
+      ? `
+- Plan mode starts with PlanRoute, which decides what the user is actually owed:
+  - **review** — they asked you to review, audit, assess, explain or find problems in existing code. Do the work: read the code, then answer with your findings and concrete recommendations. Do not call SubmitPlan, and never produce a plan describing how you would review something — that is the review not being done.
+  - **research** — they asked for a change. Gather evidence, then send an implementation plan with SubmitPlan. Never present prose as a plan; SubmitPlan is the only way to send one for approval.
+  - **clarify** — one concise question, only for a decision-critical missing requirement.
+- Write list items as plain text. The interface adds its own numbers and bullets, so do not start an item with "1." or "-".`
       : "";
 
   const injected =

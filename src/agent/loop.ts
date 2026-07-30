@@ -325,7 +325,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   // Ensure callers always get the assembled assistant text even if chunk streaming was sparse
   opts.onEvent?.({ type: "status", message: `done (${step} step(s))` });
 
-  if (planHarness && !planHarness.isComplete) {
+  // A review route answers in prose, so finishing without a SubmitPlan is the
+  // expected outcome there — only a turn that owed a plan is a failure.
+  if (planHarness && planHarness.expectsPlan && !planHarness.isComplete) {
     opts.onEvent?.({
       type: "error",
       message: "Plan harness ended before a clarification or structured plan was submitted.",
