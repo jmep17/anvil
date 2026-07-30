@@ -1,29 +1,12 @@
-/** Summarize tool input for compact TUI / REPL display. */
-export function summarizeToolInput(input: unknown, max = 80): string {
-  if (input == null) return "";
-  if (typeof input === "string") return truncateDisplay(input, max);
-
-  if (typeof input === "object" && !Array.isArray(input)) {
-    const obj = input as Record<string, unknown>;
-    for (const key of ["path", "file_path", "command", "pattern", "query", "url", "name"]) {
-      const v = obj[key];
-      if (typeof v === "string" && v.trim()) {
-        return truncateDisplay(v, max);
-      }
-    }
-  }
-
+/** Render the complete tool payload for a transcript detail block. */
+export function formatToolInput(input: unknown): string {
+  if (input == null) return "(no input)";
+  if (typeof input === "string") return input;
   try {
-    return truncateDisplay(JSON.stringify(input), max);
+    return JSON.stringify(input, null, 2) ?? String(input);
   } catch {
-    return truncateDisplay(String(input), max);
+    return String(input);
   }
-}
-
-export function truncateDisplay(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= max) return flat;
-  return `${flat.slice(0, Math.max(0, max - 1))}…`;
 }
 
 /**
@@ -60,48 +43,6 @@ export function wrapDisplayLines(text: string, width: number): string[] {
   }
 
   return out;
-}
-
-export interface DisplayExcerpt {
-  lines: string[];
-  hiddenLines: number;
-}
-
-/** Return complete terminal rows from the end of a growing response. */
-export function tailDisplayLines(
-  text: string,
-  width: number,
-  maxLines: number,
-): DisplayExcerpt {
-  const all = wrapDisplayLines(text, width);
-  const take = Math.max(1, maxLines);
-  const hiddenLines = Math.max(0, all.length - take);
-  const lines = all.slice(-take);
-  if (hiddenLines > 0 && lines.length > 0) {
-    const marker = "… ";
-    lines[0] = `${marker}${lines[0]!.slice(0, Math.max(0, width - marker.length))}`;
-  }
-  return { lines, hiddenLines };
-}
-
-/** Return complete terminal rows from the beginning of a completed response. */
-export function headDisplayLines(
-  text: string,
-  width: number,
-  maxLines: number,
-): DisplayExcerpt {
-  const all = wrapDisplayLines(text, width);
-  const take = Math.max(1, maxLines);
-  const hiddenLines = Math.max(0, all.length - take);
-  const lines = all.slice(0, take);
-  if (hiddenLines > 0 && lines.length > 0) {
-    // Keep the indicator compact enough to fit even in a narrow terminal.
-    const suffix = ` … +${hiddenLines}`;
-    const last = lines.length - 1;
-    const available = Math.max(0, width - suffix.length);
-    lines[last] = `${lines[last]!.slice(0, available).trimEnd()}${suffix}`;
-  }
-  return { lines, hiddenLines };
 }
 
 export function formatToolDuration(ms?: number): string {

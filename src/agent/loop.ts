@@ -115,7 +115,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       if (depth >= 1) {
         return "Error: nested subagents are not allowed (depth limit 1).";
       }
-      opts.onEvent?.({ type: "status", message: `Subagent: ${prompt.slice(0, 80)}…` });
+      opts.onEvent?.({ type: "status", message: `Subagent: ${prompt}` });
       const sub = await runAgent({
         config: { ...opts.config, maxSteps: Math.min(opts.config.maxSteps, 20) },
         cwd: opts.cwd,
@@ -196,7 +196,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
           type: "tool_end",
           id: toolCall.toolCallId,
           name: toolCall.toolName,
-          output: err.slice(0, 500),
+          // Tool implementations already apply their own model-safety limits.
+          // Keep the complete returned result for the transcript and session.
+          output: err,
           error: true,
           ms: toolExecutionMs,
         });
@@ -210,7 +212,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         type: "tool_end",
         id: toolCall.toolCallId,
         name: toolCall.toolName,
-        output: output.slice(0, 500),
+        output,
         ms: toolExecutionMs,
       });
     },

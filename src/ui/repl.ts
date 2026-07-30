@@ -7,7 +7,8 @@ import type { AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent } from "../tools/index.ts";
 import { allowAll, askPermissionCli } from "../tools/permissions.ts";
-import { formatToolDuration, summarizeToolInput, truncateDisplay } from "./format.ts";
+import { formatToolDuration, formatToolInput } from "./format.ts";
+import { expandFileMentions } from "./fileMentions.ts";
 
 function printEvent(event: AgentEvent): void {
   switch (event.type) {
@@ -19,15 +20,18 @@ function printEvent(event: AgentEvent): void {
       break;
     case "tool_start":
       console.log(
-        `\n\x1b[36m→ ${event.name}\x1b[0m ${summarizeToolInput(event.input)}`,
+        `\n\x1b[36m╭─ ◌ ${event.name} · running\x1b[0m\n\x1b[2m│  input\x1b[0m\n${formatToolInput(event.input).split("\n").map((line) => `│    ${line}`).join("\n")}\n\x1b[36m╰─\x1b[0m`,
       );
       break;
     case "tool_end": {
       const dur = formatToolDuration(event.ms);
       const mark = event.error ? "\x1b[31m✗" : "\x1b[2m↩";
       const reset = "\x1b[0m";
-      const out = truncateDisplay(event.output.replace(/\n/g, " "), 200);
-      console.log(`${mark} ${event.name}${dur ? ` (${dur})` : ""}: ${out}${reset}`);
+      const state = event.error ? "failed" : "complete";
+      const output = event.output.split("\n").map((line) => `│    ${line}`).join("\n");
+      console.log(
+        `${mark} ${event.name} · ${state}${dur ? ` · ${dur}` : ""}${reset}\n\x1b[2m│  output\x1b[0m\n${output}\n${mark}╰─${reset}`,
+      );
       break;
     }
     case "status":
@@ -66,7 +70,8 @@ export async function runRepl(opts: {
 
   const runTurn = async (userText: string) => {
     const before = messages.length;
-    const userMsg: ModelMessage = { role: "user", content: userText };
+    const { modelText } = await expandFileMentions(userText, opts.cwd);
+    const userMsg: ModelMessage = { role: "user", content: modelText };
     messages = [...messages, userMsg];
     await opts.session.appendMessage(userMsg);
 

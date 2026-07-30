@@ -8,13 +8,14 @@ import type { AgentMode, AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
 import { allowAll } from "../tools/permissions.ts";
-import { ACTIVITY_RESERVE, Activity } from "./Activity.tsx";
 import { ConfigPanel } from "./ConfigPanel.tsx";
-import { Footer } from "./Footer.tsx";
-import { Header } from "./Header.tsx";
-import { InputBox } from "./InputBox.tsx";
+import { Footer, footerHeight } from "./Footer.tsx";
+import { FilePicker, filePickerRows } from "./FilePicker.tsx";
+import { Header, headerHeight } from "./Header.tsx";
+import { InputBox, inputContentRows, permissionContentRows } from "./InputBox.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
+import { expandFileMentions } from "./fileMentions.ts";
 import { usePromptInput } from "./usePromptInput.ts";
 
 interface Props {
@@ -50,6 +51,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const messagesRef = useRef<ModelMessage[]>([]);
   const startedRef = useRef(false);
   const thinkingAccRef = useRef("");
+  const streamingAccRef = useRef("");
   const toolInputsRef = useRef(new Map<string, unknown>());
 
   const recordTimeline = useCallback(
@@ -65,6 +67,22 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     setHistoryOffset(0);
     if (persist) recordTimeline(item);
   }, [recordTimeline]);
+
+  /** Commit live thinking/assistant text into permanent timeline items (in order). */
+  const flushLive = useCallback(() => {
+    const thinkingText = thinkingAccRef.current.trim();
+    if (thinkingText) {
+      push({ kind: "thinking", id: nextId("th"), text: thinkingText }, false);
+    }
+    const assistantText = streamingAccRef.current;
+    if (assistantText.trim()) {
+      push({ kind: "assistant", id: nextId("a"), text: assistantText });
+    }
+    thinkingAccRef.current = "";
+    streamingAccRef.current = "";
+    setThinking("");
+    setStreaming("");
+  }, [push]);
 
   const upsertTool = useCallback((item: Extract<TimelineItem, { kind: "tool" }>) => {
       setItems((prev) => {
@@ -186,8 +204,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       setStreaming("");
       setThinking("");
       thinkingAccRef.current = "";
-      push({ kind: "user", id: nextId("u"), text });
-      const userMsg: ModelMessage = { role: "user", content: text };
+      streamingAccRef.current = "";
+      const { displayText, modelText } = await expandFileMentions(text, cwd);
+      push({ kind: "user", id: nextId("u"), text: displayText });
+      const userMsg: ModelMessage = { role: "user", content: modelText };
       const before = messagesRef.current.length;
       const nextMessages = [...messagesRef.current, userMsg];
       messagesRef.current = nextMessages;
@@ -195,14 +215,18 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
       const controller = new AbortController();
       abortRef.current = controller;
+      let streamedAny = false;
 
       const onEvent = (event: AgentEvent) => {
         if (event.type === "text") {
-          setStreaming((s) => s + event.text);
+          streamedAny = true;
+          streamingAccRef.current += event.text;
+          setStreaming(streamingAccRef.current);
         } else if (event.type === "thinking") {
           thinkingAccRef.current += event.text;
           setThinking(thinkingAccRef.current);
         } else if (event.type === "tool_start") {
+          flushLive();
           toolInputsRef.current.set(event.id, event.input);
           upsertTool({
             kind: "tool",
@@ -243,21 +267,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         const added = result.messages.slice(before + 1);
         for (const m of added) await session.appendMessage(m);
         messagesRef.current = result.messages;
-        if (thinkingAccRef.current.trim()) {
-          push({
-            kind: "thinking",
-            id: nextId("th"),
-            text: thinkingAccRef.current.trim(),
-          }, false);
-        }
-        if (result.text) {
+        flushLive();
+        // Sparse chunk streams: commit final text if nothing was streamed live.
+        if (!streamedAny && result.text?.trim()) {
           push({ kind: "assistant", id: nextId("a"), text: result.text });
         }
-        setStreaming("");
-        setThinking("");
-        thinkingAccRef.current = "";
         for (const h of result.mcpHandles) await h.close().catch(() => {});
       } catch (err) {
+        flushLive();
         push({
           kind: "error",
           id: nextId("e"),
@@ -268,7 +285,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         abortRef.current = null;
       }
     },
-    [applyMode, askPermission, busy, checkConnection, cwd, exit, push, recordTimeline, serverReady, session, upsertTool],
+    [applyMode, askPermission, busy, checkConnection, cwd, exit, flushLive, push, recordTimeline, serverReady, session, upsertTool],
   );
 
   const prompt = usePromptInput({
@@ -276,6 +293,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     blocked: Boolean(pendingPermission) || showConfig,
     editorMode: config.ui.editorMode,
     editor: config.ui.editor,
+    cwd,
     suspendTerminal,
     onSubmit: (text) => void submit(text),
     onAbort: () => abortRef.current?.abort(),
@@ -311,28 +329,24 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once on mount
   }, []);
 
-  const runningTools = items.filter(
-    (i): i is Extract<TimelineItem, { kind: "tool" }> =>
-      i.kind === "tool" && i.status === "running",
-  );
-  const timelineItems = items.filter(
-    (i) => !(i.kind === "tool" && i.status === "running"),
-  );
-
-  const inputLines = Math.max(1, prompt.buffer.value.split("\n").length);
   const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
   const pasteExtra = prompt.pasteHint ? 1 : 0;
-  // Header 3 + input (borders+content) + reserved activity + footer 1.
-  // The transcript is deliberately top-aligned, like a regular coding-agent
-  // terminal, rather than floating above the prompt in the middle of the page.
+  const pickerExtra = prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0;
+  // Active work stays inside
+  // the transcript, so it remains readable through the normal scroller.
   const inputContent = pendingPermission
-    ? pendingPermission.preview ? 3 : 2
-    : Math.min(inputLines, 6) + vimExtra + pasteExtra;
-  const inputRows = inputContent + 2;
-  const activityActive =
-    busy || Boolean(thinking) || Boolean(streaming) || runningTools.length > 0;
-  const activityRows = activityActive ? ACTIVITY_RESERVE : 0;
-  const chrome = 3 + inputRows + activityRows + 1;
+    ? permissionContentRows(pendingPermission, columns || 80)
+    : inputContentRows(prompt.buffer.value, columns || 80) + vimExtra + pasteExtra;
+  const inputRows = inputContent + 2 + pickerExtra;
+  const footerState = {
+    busy,
+    editorMode: config.ui.editorMode,
+    vimMode: prompt.vimMode,
+    showConfig,
+    browsingHistory: historyOffset > 0,
+    filePicker: Boolean(prompt.filePicker),
+  };
+  const chrome = headerHeight(status, columns || 80) + inputRows + footerHeight(footerState, columns || 80);
   const timelineLines = Math.max(3, (rows || 24) - chrome);
 
   useInput((ch, key) => {
@@ -345,11 +359,11 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     } else if (pendingPermission && (ch === "d" || ch === "n")) {
       pendingPermission.resolve("deny");
       setPendingPermission(null);
-    } else if (!pendingPermission && !showConfig && !busy && key.pageUp) {
+    } else if (!pendingPermission && !showConfig && key.pageUp) {
       setHistoryOffset((offset) =>
-        Math.min(10_000, offset + Math.max(1, Math.floor(timelineLines * 0.8))),
+        offset + Math.max(1, Math.floor(timelineLines * 0.8)),
       );
-    } else if (!pendingPermission && !showConfig && !busy && key.pageDown) {
+    } else if (!pendingPermission && !showConfig && key.pageDown) {
       setHistoryOffset((offset) =>
         Math.max(0, offset - Math.max(1, Math.floor(timelineLines * 0.8))),
       );
@@ -358,20 +372,15 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   return (
     <Box flexDirection="column" width="100%" height={rows || undefined}>
-      <Header status={status} />
+      <Header status={status} columns={columns || 80} />
       <Box flexGrow={1} flexDirection="column" overflow="hidden">
         <Timeline
-          items={timelineItems}
+          items={items}
           maxLines={timelineLines}
           columns={columns || 80}
-          scrollOffset={historyOffset}
-        />
-        <Activity
-          busy={busy}
           thinking={thinking}
           streaming={streaming}
-          runningTools={runningTools}
-          columns={columns || 80}
+          scrollOffset={historyOffset}
         />
       </Box>
       {showConfig ? (
@@ -390,23 +399,34 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           onRetryConnection={() => void checkConnection()}
         />
       ) : (
-        <InputBox
-          value={prompt.buffer.value}
-          cursor={prompt.buffer.cursor}
-          busy={busy}
-          vimMode={prompt.vimMode}
-          editorMode={config.ui.editorMode}
-          pasteHint={prompt.pasteHint}
-          pending={
-            pendingPermission
-              ? {
-                  toolName: pendingPermission.toolName,
-                  detail: pendingPermission.detail,
-                  preview: pendingPermission.preview,
-                }
-              : null
-          }
-        />
+        <>
+          {prompt.filePicker ? (
+            <FilePicker
+              matches={prompt.filePicker.matches}
+              selected={prompt.filePicker.selected}
+              query={prompt.filePicker.query}
+              columns={columns || 80}
+            />
+          ) : null}
+          <InputBox
+            value={prompt.buffer.value}
+            cursor={prompt.buffer.cursor}
+            busy={busy}
+            vimMode={prompt.vimMode}
+            editorMode={config.ui.editorMode}
+            pasteHint={prompt.pasteHint}
+            columns={columns || 80}
+            pending={
+              pendingPermission
+                ? {
+                    toolName: pendingPermission.toolName,
+                    detail: pendingPermission.detail,
+                    preview: pendingPermission.preview,
+                  }
+                : null
+            }
+          />
+        </>
       )}
       <Footer
         busy={busy}
@@ -414,6 +434,8 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         vimMode={prompt.vimMode}
         showConfig={showConfig}
         browsingHistory={historyOffset > 0}
+        filePicker={Boolean(prompt.filePicker)}
+        columns={columns || 80}
       />
     </Box>
   );

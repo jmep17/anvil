@@ -59,11 +59,12 @@ Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal 
 | Key | Action |
 |-----|--------|
 | Enter | Send message |
+| `@` | Reference a project file (fuzzy picker; contents inlined on send) |
 | Ctrl+J / Shift+Enter | Insert newline |
 | Arrow keys / Home / End | Move cursor in the prompt |
 | Ctrl+A / Ctrl+E | Line start / end |
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
-| Esc | Interrupt (busy); in Vim insert → normal; otherwise clear input |
+| Esc | Interrupt (busy); dismiss `@` picker; in Vim insert → normal; otherwise clear input |
 | PgUp / PgDn | Browse the full transcript; PgDn returns to live output |
 | Shift+Tab | Toggle plan ↔ build |
 | a / A / d | Allow once / allow the exact same action for this session / deny |
