@@ -84,6 +84,60 @@ export function wrapDisplayLines(text: string, width: number): string[] {
   return out;
 }
 
+function countLines(text: string): number {
+  const trimmed = text.replace(/\n+$/, "");
+  return trimmed ? trimmed.split("\n").length : 0;
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+/**
+ * One-line headline for a completed tool, in place of its raw output. Mirrors
+ * the shape of each tool's own return value, falling back to a line count.
+ */
+export function summarizeToolResult(
+  name: string,
+  output: string | undefined,
+  error?: boolean,
+): string {
+  if (output == null) return "";
+  const text = output.trim();
+  if (!text) return "(no output)";
+  if (error) return text.split("\n")[0] ?? "failed";
+  if (text.startsWith("Error:")) return text.split("\n")[0] ?? "failed";
+
+  switch (name) {
+    case "Read":
+      return plural(countLines(text), "line");
+    case "Glob":
+      return text === "No files matched." ? "No files matched" : plural(countLines(text), "file");
+    case "Grep":
+      return text === "No matches found."
+        ? "No matches"
+        : plural(countLines(text), "match", "matches");
+    case "Bash": {
+      const code = /^exit_code: (-?\d+)$/m.exec(text)?.[1];
+      const stdout = /stdout:\n([\s\S]*?)(?:\n\nstderr:|$)/.exec(text)?.[1] ?? "";
+      const lines = countLines(stdout);
+      const status = /^status: (.+)$/m.exec(text)?.[1];
+      if (status) return status;
+      return `exit ${code ?? "?"} · ${plural(lines, "line")}`;
+    }
+    case "Write":
+    case "Edit":
+      return text.split("\n")[0] ?? "";
+    case "TodoWrite":
+      return text.split("\n")[0] ?? "";
+    default: {
+      const lines = countLines(text);
+      if (lines <= 1) return text.length > 96 ? `${text.slice(0, 95)}…` : text;
+      return plural(lines, "line");
+    }
+  }
+}
+
 export function formatToolDuration(ms?: number): string {
   if (ms == null || !Number.isFinite(ms)) return "";
   if (ms < 1000) return `${Math.round(ms)}ms`;

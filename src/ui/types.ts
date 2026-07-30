@@ -1,6 +1,9 @@
+import type { TodoItem } from "../tools/index.ts";
+
 export type ToolStatus = "running" | "done" | "error";
 
 export type TimelineItem =
+  | { kind: "todos"; id: string; todos: TodoItem[] }
   | { kind: "user"; id: string; text: string }
   | { kind: "assistant"; id: string; text: string }
   | { kind: "plan"; id: string; text: string }

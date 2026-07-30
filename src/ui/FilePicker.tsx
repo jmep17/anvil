@@ -19,7 +19,6 @@ export function FilePicker({
       border
       borderStyle="rounded"
       borderColor={colors.muted}
-      backgroundColor={colors.surface}
         paddingX={1}
         flexShrink={0}
       >
@@ -37,7 +36,6 @@ export function FilePicker({
       border
       borderStyle="rounded"
       borderColor={colors.border}
-      backgroundColor={colors.surfaceRaised}
       paddingX={1}
       flexShrink={0}
     >

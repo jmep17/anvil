@@ -246,7 +246,7 @@ export function ConfigPanel({
       width="100%"
       flexShrink={0}
     >
-      <text fg={colors.purple} attributes={TextAttributes.BOLD}>
+      <text fg={colors.accent} attributes={TextAttributes.BOLD}>
         {`CONFIGURATION  ${selected + 1}/${FIELDS.length}`}
       </text>
       {range.hintLines.map((line, index) => (

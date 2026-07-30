@@ -19,6 +19,8 @@ export function createTodoWriteTool(ctx: ToolContext) {
     }),
     execute: async ({ todos }) => {
       ctx.todos.splice(0, ctx.todos.length, ...(todos as TodoItem[]));
+      // The UI renders the checklist itself rather than the returned text.
+      ctx.emit?.({ type: "todos", todos: [...ctx.todos] });
       const summary = ctx.todos
         .map((t) => `- [${t.status}] ${t.id}: ${t.content}`)
         .join("\n");

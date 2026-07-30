@@ -18,6 +18,7 @@ export type AgentEvent =
       error?: boolean;
       ms?: number;
     }
+  | { type: "todos"; todos: TodoItem[] }
   | { type: "status"; message: string }
   | { type: "error"; message: string }
   | { type: "step"; step: number };

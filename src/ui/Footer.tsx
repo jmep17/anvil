@@ -1,7 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import { memo } from "react";
-import type { EditorMode } from "../config/types.ts";
-import { wrapDisplayLines } from "./format.ts";
+import type { AgentMode, EditorMode } from "../config/types.ts";
 import { colors } from "./theme.ts";
 import type { VimMode } from "./usePromptInput.ts";
 
@@ -12,9 +11,23 @@ export interface FooterState {
   showConfig?: boolean;
   browsingHistory?: boolean;
   filePicker?: boolean;
+  commandPicker?: boolean;
   planReview?: "ready" | "denying";
+  queued?: number;
 }
 
+export interface FooterStatus {
+  mode: AgentMode;
+  model: string;
+  /** Fraction of the context window in use, 0–1. */
+  contextUsed?: number;
+  online?: boolean;
+}
+
+/**
+ * A single short hint. The full key list lives in `/help` — a footer that wraps
+ * onto a second line costs a transcript row on every frame.
+ */
 export function footerHint({
   busy,
   editorMode,
@@ -22,40 +35,78 @@ export function footerHint({
   showConfig,
   browsingHistory,
   filePicker,
+  commandPicker,
   planReview,
+  queued,
 }: FooterState): string {
-  if (showConfig) return "↑/↓ navigate · Enter edit · Esc close";
-  if (busy) return "PgUp/PgDn transcript · click tool to expand · Esc interrupt";
+  if (showConfig) return "↑↓ navigate · enter edit · esc close";
   if (planReview === "ready") return "[a] approve & implement · [d] decline with feedback";
-  if (planReview === "denying") return "Describe changes · Enter revise plan · Esc return to review";
-  if (filePicker) return "↑/↓ files · Tab/Enter select · Esc dismiss · type to filter";
-  if (browsingHistory) return "PgUp/PgDn transcript · PgDn returns live · Enter send · /config /exit";
-  if (editorMode === "vim" && vimMode === "normal") {
-    return "hjkl move · i insert · Enter send · Ctrl+G editor · /config";
+  if (planReview === "denying") return "describe changes · enter revise · esc back";
+  if (filePicker) return "↑↓ files · tab select · esc dismiss";
+  if (commandPicker) return "↑↓ commands · tab complete · esc dismiss";
+  if (busy) {
+    const suffix = queued ? ` · ${queued} queued` : "";
+    return `esc interrupt · ctrl+o expand output${suffix}`;
   }
-  return "Enter send · @ file · click tool to expand · PgUp/PgDn · Ctrl+J newline · Ctrl+G editor · Esc clear · /config /retry /exit";
+  if (browsingHistory) return "pgup/pgdn scroll · pgdn returns to live output";
+  if (editorMode === "vim" && vimMode === "normal") return "-- NORMAL -- · i insert · ? for shortcuts";
+  return "? for shortcuts";
 }
 
-export function footerHeight(state: FooterState, columns: number): number {
-  // One top border row; horizontal padding and the hint marker use four columns.
-  return 1 + wrapDisplayLines(footerHint(state), Math.max(12, columns - 4)).length;
+/** `build · qwen/qwen3.5-9b · 34% context` */
+export function footerStatus({ mode, model, contextUsed, online }: FooterStatus): string {
+  const parts = [mode, model];
+  if (contextUsed != null && contextUsed > 0) {
+    parts.push(`${Math.min(100, Math.round(contextUsed * 100))}% context`);
+  }
+  if (online === false) parts.push("offline");
+  return parts.join(" · ");
 }
 
-export const Footer = memo(function Footer({ columns, ...state }: FooterState & { columns: number }) {
+export function footerHeight(): number {
+  // A single row plus its top rule, always — nothing here wraps.
+  return 2;
+}
+
+export const Footer = memo(function Footer({
+  columns,
+  status,
+  ...state
+}: FooterState & { columns: number; status: FooterStatus }) {
+  const hint = footerHint(state);
+  const right = footerStatus(status);
+  // Drop the status segment rather than wrap when the terminal is too narrow.
+  const room = columns - 4;
+  const showRight = hint.length + right.length + 2 <= room;
+  const contextWarning = (status.contextUsed ?? 0) >= 0.8;
+
   return (
     <box
       border={["top"]}
       borderColor={colors.borderMuted}
-      backgroundColor={colors.surfaceMuted}
       paddingX={1}
-      flexDirection="column"
+      flexDirection="row"
       flexShrink={0}
+      width="100%"
     >
-      {wrapDisplayLines(footerHint(state), Math.max(12, columns - 4)).map((line, index) => (
-        <text key={index} fg={colors.muted} attributes={TextAttributes.DIM}>
-          {`⌁  ${line}`}
+      <text fg={colors.faint} attributes={TextAttributes.DIM}>
+        {hint}
+      </text>
+      <box flexGrow={1} />
+      {showRight ? (
+        <text
+          fg={
+            status.online === false
+              ? colors.danger
+              : contextWarning
+                ? colors.warning
+                : colors.faint
+          }
+          attributes={TextAttributes.DIM}
+        >
+          {right}
         </text>
-      ))}
+      ) : null}
     </box>
   );
 });

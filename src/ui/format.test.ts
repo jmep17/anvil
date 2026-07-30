@@ -3,8 +3,53 @@ import {
   formatToolDuration,
   formatToolInput,
   summarizeToolInput,
+  summarizeToolResult,
   wrapDisplayLines,
 } from "./format.ts";
+
+describe("summarizeToolResult", () => {
+  test("counts what a Read returned", () => {
+    expect(summarizeToolResult("Read", "     1|one\n     2|two\n")).toBe("2 lines");
+    expect(summarizeToolResult("Read", "     1|only\n")).toBe("1 line");
+  });
+
+  test("counts files and matches, and names the empty cases", () => {
+    expect(summarizeToolResult("Glob", "a.ts\nb.ts\nc.ts")).toBe("3 files");
+    expect(summarizeToolResult("Glob", "No files matched.")).toBe("No files matched");
+    expect(summarizeToolResult("Grep", "a.ts:1:hit\nb.ts:4:hit")).toBe("2 matches");
+    expect(summarizeToolResult("Grep", "No matches found.")).toBe("No matches");
+  });
+
+  test("reports a Bash exit code with its output size", () => {
+    expect(summarizeToolResult("Bash", "exit_code: 0\n\nstdout:\nline\nline")).toBe(
+      "exit 0 · 2 lines",
+    );
+  });
+
+  test("surfaces a Bash timeout instead of a bare exit code", () => {
+    const output = "status: timed out after 500ms and was killed\n\nexit_code: 143\n\nstdout: (empty)";
+    expect(summarizeToolResult("Bash", output)).toBe("timed out after 500ms and was killed");
+  });
+
+  test("an error shows its first line rather than a count", () => {
+    expect(summarizeToolResult("Read", "Error: file not found: /x\ntrace", true)).toBe(
+      "Error: file not found: /x",
+    );
+    expect(summarizeToolResult("Edit", "Error: old_string not found in file")).toBe(
+      "Error: old_string not found in file",
+    );
+  });
+
+  test("unknown tools fall back to a line count, or the text when it is short", () => {
+    expect(summarizeToolResult("Whatever", "one\ntwo\nthree")).toBe("3 lines");
+    expect(summarizeToolResult("Whatever", "short answer")).toBe("short answer");
+  });
+
+  test("missing output renders nothing", () => {
+    expect(summarizeToolResult("Read", undefined)).toBe("");
+    expect(summarizeToolResult("Read", "   ")).toBe("(no output)");
+  });
+});
 
 describe("formatToolInput", () => {
   test("prints complete structured input without summary truncation", () => {

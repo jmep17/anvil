@@ -1,7 +1,23 @@
 import { TextAttributes } from "@opentui/core";
+import { DiffView, diffHeight } from "./DiffView.tsx";
 import { wrapDisplayLines } from "./format.ts";
 import { colors } from "./theme.ts";
 import type { VimMode } from "./usePromptInput.ts";
+
+/** Choices offered for a pending tool approval, in display order. */
+export const PERMISSION_CHOICES = ["allow", "always", "deny"] as const;
+export type PermissionChoice = (typeof PERMISSION_CHOICES)[number];
+
+export const PLAN_CHOICES = ["approve", "decline"] as const;
+export type PlanChoice = (typeof PLAN_CHOICES)[number];
+
+export interface PendingPermission {
+  toolName: string;
+  detail: string;
+  preview?: string;
+}
+
+const MAX_PREVIEW_ROWS = 16;
 
 function softWrap(line: string, width: number): string[] {
   const text = line.replace(/\t/g, "  ");
@@ -13,24 +29,46 @@ function softWrap(line: string, width: number): string[] {
   return out;
 }
 
-/** Number of prompt body rows, including its label, after terminal wrapping. */
+/** Number of prompt body rows, after terminal wrapping. */
 export function inputContentRows(value: string, columns: number): number {
   const width = Math.max(8, columns - 6);
-  return 1 + Math.max(1, value.split("\n").reduce((total, line) => total + softWrap(line, width).length, 0));
+  return Math.max(
+    1,
+    value.split("\n").reduce((total, line) => total + softWrap(line, width).length, 0),
+  );
 }
 
-export function permissionContentRows(
-  pending: { toolName: string; detail: string; preview?: string },
-  columns: number,
-): number {
-  const width = Math.max(12, columns - 4);
-  const text = [
-    `Permission required · ${pending.toolName}`,
-    pending.detail,
-    ...(pending.preview ? [pending.preview] : []),
-    "[a] allow once · [A] same action this session · [d] deny",
+function permissionQuestion(toolName: string): string {
+  switch (toolName) {
+    case "Edit":
+      return "Do you want to make this edit?";
+    case "Write":
+      return "Do you want to create this file?";
+    case "Bash":
+      return "Do you want to run this command?";
+    default:
+      return `Do you want to allow ${toolName}?`;
+  }
+}
+
+function permissionOptions(toolName: string): string[] {
+  const scope =
+    toolName === "Bash" ? "for commands like this" : "for this file";
+  return [
+    "Yes",
+    `Yes, and don't ask again ${scope} this session`,
+    "No, and tell Anvil what to do differently (esc)",
   ];
-  return text.reduce((total, line) => total + wrapDisplayLines(line, width).length, 0);
+}
+
+export function permissionContentRows(pending: PendingPermission, columns: number): number {
+  const width = Math.max(12, columns - 4);
+  const preview = pending.preview
+    ? diffHeight(pending.preview, MAX_PREVIEW_ROWS) + 1
+    : 0;
+  const detail = wrapDisplayLines(pending.detail, width).length;
+  // title + detail + preview + blank + question + three options
+  return 1 + detail + preview + 1 + 1 + permissionOptions(pending.toolName).length;
 }
 
 export function planReviewContentRows(
@@ -38,8 +76,35 @@ export function planReviewContentRows(
   value: string,
   columns: number,
 ): number {
-  if (phase === "ready") return 2;
+  if (phase === "ready") return 1 + 1 + PLAN_CHOICES.length;
   return inputContentRows(value, columns) + 1;
+}
+
+function OptionList({
+  options,
+  selected,
+  accent,
+}: {
+  options: string[];
+  selected: number;
+  accent: string;
+}) {
+  return (
+    <>
+      {options.map((option, index) => {
+        const active = index === selected;
+        return (
+          <text
+            key={index}
+            fg={active ? accent : colors.muted}
+            attributes={active ? TextAttributes.BOLD : TextAttributes.DIM}
+          >
+            {`${active ? "❯" : " "} ${index + 1}. ${option}`}
+          </text>
+        );
+      })}
+    </>
+  );
 }
 
 export function InputBox({
@@ -47,20 +112,24 @@ export function InputBox({
   cursor,
   busy,
   pending,
+  pendingChoice = 0,
+  planReview,
+  planChoice = 0,
   vimMode,
   editorMode,
   pasteHint,
-  planReview,
   columns,
 }: {
   value: string;
   cursor: number;
   busy: boolean;
-  pending?: { toolName: string; detail: string; preview?: string } | null;
+  pending?: PendingPermission | null;
+  pendingChoice?: number;
+  planReview?: "ready" | "denying" | null;
+  planChoice?: number;
   vimMode?: VimMode;
   editorMode?: "emacs" | "vim";
   pasteHint?: string | null;
-  planReview?: "ready" | "denying" | null;
   columns: number;
 }) {
   if (pending) {
@@ -69,48 +138,46 @@ export function InputBox({
       <box
         border
         borderStyle="rounded"
-        borderColor={colors.yellow}
-        backgroundColor={colors.surfaceRaised}
+        borderColor={colors.warning}
         paddingX={1}
         flexDirection="column"
         flexShrink={0}
       >
-        {wrapDisplayLines(`Permission required · ${pending.toolName}`, width).map((line, index) => (
-          <text key={`title-${index}`} fg={colors.yellow} attributes={TextAttributes.BOLD}>
-            {line}
+        <box flexDirection="row">
+          <text fg={colors.warning} attributes={TextAttributes.BOLD}>
+            {pending.toolName}
           </text>
-        ))}
-        {wrapDisplayLines(pending.detail, width).map((line, index) => (
-          <text key={`detail-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
-            {line}
-          </text>
-        ))}
-        {pending.preview
-          ? wrapDisplayLines(pending.preview, width).map((line, index) => (
-              <text key={`preview-${index}`} fg={colors.cyan}>
-                {line}
-              </text>
-            ))
-          : null}
-        {wrapDisplayLines("[a] allow once · [A] same action this session · [d] deny", width).map(
-          (line, index) => (
-            <text key={`actions-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
-              {line}
-            </text>
-          ),
-        )}
+          <text fg={colors.muted}>{`  ${pending.detail}`}</text>
+        </box>
+        {pending.preview ? (
+          <DiffView diff={pending.preview} path={pending.detail} maxHeight={MAX_PREVIEW_ROWS} />
+        ) : null}
+        <text fg={colors.text}>{wrapDisplayLines(permissionQuestion(pending.toolName), width)[0]}</text>
+        <OptionList
+          options={permissionOptions(pending.toolName)}
+          selected={pendingChoice}
+          accent={colors.warning}
+        />
       </box>
     );
   }
 
   if (planReview === "ready") {
-    const width = Math.max(12, columns - 4);
     return (
-      <box border borderStyle="rounded" borderColor={colors.green} backgroundColor={colors.surfaceRaised} paddingX={1} flexDirection="column" flexShrink={0}>
-        <text fg={colors.green} attributes={TextAttributes.BOLD}>PLAN READY FOR REVIEW</text>
-        {wrapDisplayLines("[a] approve & implement · [d] decline with feedback", width).map((line, index) => (
-          <text key={index} fg={colors.muted} attributes={TextAttributes.DIM}>{line}</text>
-        ))}
+      <box
+        border
+        borderStyle="rounded"
+        borderColor={colors.success}
+        paddingX={1}
+        flexDirection="column"
+        flexShrink={0}
+      >
+        <text fg={colors.text}>Ready to implement this plan?</text>
+        <OptionList
+          options={["Yes, implement it", "No, let me give feedback"]}
+          selected={planChoice}
+          accent={colors.success}
+        />
       </box>
     );
   }
@@ -134,43 +201,59 @@ export function InputBox({
     }
   }
 
+  const empty = value.length === 0;
+  const borderColor =
+    planReview === "denying" ? colors.success : busy ? colors.accentDim : colors.border;
+
   return (
     <box
       flexDirection="column"
       border
       borderStyle="rounded"
-      borderColor={busy ? colors.yellow : colors.cyan}
-      backgroundColor={colors.surface}
+      borderColor={borderColor}
       paddingX={1}
       flexShrink={0}
     >
-      <text fg={busy ? colors.yellow : colors.cyan} attributes={TextAttributes.BOLD}>
-        {busy ? "REQUEST · AGENT WORKING" : planReview === "denying" ? "PLAN FEEDBACK · WHY REVISE?" : "REQUEST · READY"}
-      </text>
       {planReview === "denying" ? (
         <text fg={colors.muted} attributes={TextAttributes.DIM}>
-          Describe what to change, then press Enter to request a revised plan.
+          What should change? Enter sends the feedback.
         </text>
       ) : null}
-      {editorMode === "vim" ? (
+      {editorMode === "vim" && vimMode === "normal" ? (
         <text fg={colors.muted} attributes={TextAttributes.DIM}>
-          {vimMode === "normal" ? "-- NORMAL --" : "-- INSERT --"}
+          -- NORMAL --
         </text>
       ) : null}
-      {pasteHint ? <text fg={colors.cyan}>{pasteHint}</text> : null}
+      {pasteHint ? (
+        <text fg={colors.accent} attributes={TextAttributes.DIM}>
+          {pasteHint}
+        </text>
+      ) : null}
       {lines.flatMap((line, lineIndex) => {
         const chunks = softWrap(line, width);
         return chunks.map((chunk, chunkIndex) => {
           const start = chunkIndex * width;
           const active =
-            !busy && lineIndex === cursorLine && cursorCol >= start && cursorCol <= start + chunk.length;
+            lineIndex === cursorLine && cursorCol >= start && cursorCol <= start + chunk.length;
           const localCursor = Math.max(0, Math.min(chunk.length, cursorCol - start));
-          const prefix = lineIndex === 0 && chunkIndex === 0 ? "› " : "· ";
+          const prefix = lineIndex === 0 && chunkIndex === 0 ? "> " : "  ";
+
+          if (empty && lineIndex === 0 && chunkIndex === 0) {
+            return (
+              <box key="placeholder" flexDirection="row">
+                <text fg={colors.accent}>{prefix}</text>
+                <text attributes={TextAttributes.INVERSE}>{" "}</text>
+                <text fg={colors.faint} attributes={TextAttributes.DIM}>
+                  {busy ? "" : " Ask Anvil to build, explain or fix something"}
+                </text>
+              </box>
+            );
+          }
           if (!active) {
             return (
               <box key={`${lineIndex}-${chunkIndex}`} flexDirection="row">
-                <text fg={colors.green}>{prefix}</text>
-                <text>{chunk || " "}</text>
+                <text fg={colors.accent}>{prefix}</text>
+                <text fg={colors.text}>{chunk || " "}</text>
               </box>
             );
           }
@@ -179,10 +262,10 @@ export function InputBox({
           const after = chunk.slice(localCursor + 1);
           return (
             <box key={`${lineIndex}-${chunkIndex}`} flexDirection="row">
-              <text fg={colors.green}>{prefix}</text>
-              <text>{before}</text>
+              <text fg={colors.accent}>{prefix}</text>
+              <text fg={colors.text}>{before}</text>
               <text attributes={TextAttributes.INVERSE}>{at}</text>
-              <text>{after}</text>
+              <text fg={colors.text}>{after}</text>
             </box>
           );
         });

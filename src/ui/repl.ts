@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import type { ModelMessage } from "ai";
-import { compactMessages } from "../agent/compact.ts";
+import { compactMessages, estimateTokens } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
 import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
@@ -8,7 +8,12 @@ import type { AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent } from "../tools/index.ts";
 import { allowAll, askPermissionCli } from "../tools/permissions.ts";
-import { formatToolDuration, formatToolInput } from "./format.ts";
+import { findCommand, helpText, parseCommand } from "./commands.ts";
+import {
+  formatToolDuration,
+  summarizeToolInput,
+  summarizeToolResult,
+} from "./format.ts";
 import { expandFileMentions } from "./fileMentions.ts";
 
 function printEvent(event: AgentEvent): void {
@@ -20,21 +25,22 @@ function printEvent(event: AgentEvent): void {
       process.stderr.write(`\x1b[2m${event.text}\x1b[0m`);
       break;
     case "tool_start":
-      console.log(
-        `\n\x1b[36m╭─ ◌ ${event.name} · running\x1b[0m\n\x1b[2m│  input\x1b[0m\n${formatToolInput(event.input).split("\n").map((line) => `│    ${line}`).join("\n")}\n\x1b[36m╰─\x1b[0m`,
-      );
+      // Same bullet-and-corner shape as the TUI transcript.
+      console.log(`\n\x1b[33m⏺\x1b[0m ${event.name}(${summarizeToolInput(event.input, 60)})`);
       break;
     case "tool_end": {
       const dur = formatToolDuration(event.ms);
-      const mark = event.error ? "\x1b[31m✗" : "\x1b[2m↩";
-      const reset = "\x1b[0m";
-      const state = event.error ? "failed" : "complete";
-      const output = event.output.split("\n").map((line) => `│    ${line}`).join("\n");
-      console.log(
-        `${mark} ${event.name} · ${state}${dur ? ` · ${dur}` : ""}${reset}\n\x1b[2m│  output\x1b[0m\n${output}\n${mark}╰─${reset}`,
-      );
+      const color = event.error ? "\x1b[31m" : "\x1b[2m";
+      const summary = summarizeToolResult(event.name, event.output, event.error);
+      console.log(`${color}  ⎿  ${summary}${dur ? ` · ${dur}` : ""}\x1b[0m`);
       break;
     }
+    case "todos":
+      for (const todo of event.todos) {
+        const mark = todo.status === "completed" ? "☒" : todo.status === "in_progress" ? "◐" : "☐";
+        console.log(`\x1b[2m  ${mark} ${todo.content}\x1b[0m`);
+      }
+      break;
     case "status":
       console.log(`\x1b[2m${event.message}\x1b[0m`);
       break;
@@ -64,7 +70,7 @@ export async function runRepl(opts: {
   console.log(`anvil · ${opts.config.model} · ${opts.cwd}`);
   console.log(`server ok (${probe.detail})`);
   console.log(`session ${opts.session.id} · mode ${opts.config.mode}`);
-  console.log("Commands: /exit /mode plan|build /compact /config /help\n");
+  console.log("Enter /help for commands\n");
 
   let messages: ModelMessage[] = await opts.session.loadMessages();
   const ask = opts.yes ? allowAll : askPermissionCli;
@@ -164,30 +170,58 @@ export async function runRepl(opts: {
     while (true) {
       const line = (await rl.question("\x1b[1myou>\x1b[0m ")).trim();
       if (!line) continue;
-      if (line === "/exit" || line === "/quit") break;
-      if (line === "/help") {
-        console.log("/exit  /mode plan|build  /compact  /config  /help");
-        continue;
-      }
-      if (line === "/config") {
-        console.log("Interactive /config is available in the TUI (`anvil` or `anvil --tui`).");
-        console.log("Or use: anvil config set <key> <value>");
-        continue;
-      }
-      if (line.startsWith("/mode ")) {
-        const mode = line.slice(6).trim();
-        if (mode === "plan" || mode === "build") {
-          opts.config.mode = mode;
-          console.log(`mode → ${mode}`);
-        } else {
-          console.log("usage: /mode plan|build");
+
+      // Same registry the TUI uses, so the two surfaces cannot drift apart.
+      const command = parseCommand(line);
+      if (command) {
+        if (command.name === "quit" || command.name === "exit") break;
+        const known = findCommand(command.name);
+        if (!known) {
+          console.log(`Unknown command: /${command.name}. Enter /help to see what is available.`);
+          continue;
         }
-        continue;
-      }
-      if (line === "/compact") {
-        messages = compactMessages(messages, opts.config.contextLength, 8);
-        console.log(`compacted to ${messages.length} messages`);
-        continue;
+        switch (command.name) {
+          case "help":
+            console.log(helpText());
+            continue;
+          case "config":
+            console.log("Interactive /config is available in the TUI (`anvil` or `anvil --tui`).");
+            console.log("Or use: anvil config set <key> <value>");
+            continue;
+          case "retry":
+            console.log("Re-checking the model server is available in the TUI.");
+            continue;
+          case "clear":
+            messages = [];
+            console.log("context cleared");
+            continue;
+          case "status":
+            console.log(`model ${opts.config.model} · mode ${opts.config.mode}`);
+            console.log(`server ${opts.config.baseURL}`);
+            console.log(
+              `context ${estimateTokens(messages)} of ${opts.config.contextLength} estimated tokens`,
+            );
+            console.log(`session ${opts.session.id} · cwd ${opts.cwd}`);
+            continue;
+          case "mode":
+            if (command.args === "plan" || command.args === "build") {
+              opts.config.mode = command.args;
+              console.log(`mode → ${command.args}`);
+            } else {
+              console.log("usage: /mode plan|build");
+            }
+            continue;
+          case "compact": {
+            const before = messages.length;
+            messages = compactMessages(messages, opts.config.contextLength, 8);
+            console.log(
+              messages.length === before
+                ? `nothing to compact — ${before} messages are within the context budget`
+                : `compacted ${before} messages to ${messages.length}`,
+            );
+            continue;
+          }
+        }
       }
       await runTurn(line);
     }

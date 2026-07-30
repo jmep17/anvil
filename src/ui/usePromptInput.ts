@@ -30,6 +30,14 @@ import {
   applyMentionSelection,
 } from "./fileMentions.ts";
 import { keyChar } from "./keys.ts";
+import { matchCommands, type SlashCommand } from "./commands.ts";
+import {
+  createHistory,
+  next as historyNext,
+  previous as historyPrevious,
+  release,
+  remember,
+} from "./history.ts";
 
 export type VimMode = "insert" | "normal";
 
@@ -39,11 +47,17 @@ export interface FilePickerState {
   selected: number;
 }
 
+export interface CommandPickerState {
+  matches: SlashCommand[];
+  selected: number;
+}
+
 export interface PromptInputState {
   buffer: TextBuffer;
   vimMode: VimMode;
   pasteHint: string | null;
   filePicker: FilePickerState | null;
+  commandPicker: CommandPickerState | null;
 }
 
 interface Options {
@@ -59,6 +73,17 @@ interface Options {
   allowModeToggle?: boolean;
   onPasteNotice?: (msg: string) => void;
   isActive?: boolean;
+  initialHistory?: string[];
+}
+
+/** True when the cursor sits on the buffer's first line. */
+function onFirstLine(buf: TextBuffer): boolean {
+  return !buf.value.slice(0, buf.cursor).includes("\n");
+}
+
+/** True when the cursor sits on the buffer's last line. */
+function onLastLine(buf: TextBuffer): boolean {
+  return !buf.value.slice(buf.cursor).includes("\n");
 }
 
 function applyEmacsNav(buf: TextBuffer, key: KeyEvent): TextBuffer | null {
@@ -90,6 +115,11 @@ export function usePromptInput(opts: Options) {
   const [pasteHint, setPasteHint] = useState<string | null>(null);
   const [filePicker, setFilePicker] = useState<FilePickerState | null>(null);
   const [pickerDismissed, setPickerDismissed] = useState(false);
+  const [commandPicker, setCommandPicker] = useState<CommandPickerState | null>(null);
+  const [commandDismissed, setCommandDismissed] = useState(false);
+  const [history, setHistory] = useState(() => createHistory(opts.initialHistory));
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const pendingD = useRef(false);
   const editingRef = useRef(false);
   const filesRef = useRef<string[]>([]);
@@ -103,7 +133,17 @@ export function usePromptInput(opts: Options) {
     pendingD.current = false;
     setFilePicker(null);
     setPickerDismissed(false);
+    setCommandPicker(null);
+    setCommandDismissed(false);
+    setHistory((h) => release(h));
   }, []);
+
+  /** Submit, recording the text for ↑ recall. */
+  const submit = useCallback((value: string) => {
+    setHistory((h) => remember(h, value));
+    resetBuffer();
+    optsRef.current.onSubmit(value);
+  }, [resetBuffer]);
 
   const setValue = useCallback((value: string, cursor?: number) => {
     setBuffer(createBuffer(value, cursor));
@@ -123,7 +163,7 @@ export function usePromptInput(opts: Options) {
     const o = optsRef.current;
     const vim = o.editorMode === "vim";
     const insertOk = !vim || vimMode === "insert";
-    if (o.busy || o.blocked || !insertOk) {
+    if (o.blocked || !insertOk) {
       setFilePicker(null);
       return;
     }
@@ -168,8 +208,24 @@ export function usePromptInput(opts: Options) {
       .catch(() => {});
   }, [opts.cwd]);
 
+  useEffect(() => {
+    if (opts.blocked || commandDismissed) {
+      setCommandPicker(null);
+      return;
+    }
+    const matches = matchCommands(buffer.value);
+    if (!matches || matches.length === 0) {
+      setCommandPicker(null);
+      return;
+    }
+    setCommandPicker((prev) => ({
+      matches,
+      selected: prev ? Math.min(prev.selected, matches.length - 1) : 0,
+    }));
+  }, [buffer.value, commandDismissed, opts.blocked]);
+
   usePaste((event) => {
-    if (opts.isActive === false || opts.busy || opts.blocked || editingRef.current) return;
+    if (opts.isActive === false || opts.blocked || editingRef.current) return;
     const text = decodePasteBytes(event.bytes);
     const cleaned = normalizePaste(text);
     setBuffer((b) => insert(b, cleaned));
@@ -205,21 +261,49 @@ export function usePromptInput(opts: Options) {
       opts.onAbort();
       return;
     }
-    if (opts.busy) return;
 
-    if (key.shift && key.name === "tab" && opts.allowModeToggle !== false) {
+    // Typing stays live while the agent works; Enter queues the message rather
+    // than dropping the keystrokes.
+    if (!opts.busy && key.shift && key.name === "tab" && opts.allowModeToggle !== false) {
       opts.onToggleAgentMode();
       return;
     }
 
-    if (key.ctrl && key.name === "g") {
+    if (!opts.busy && key.ctrl && key.name === "g") {
       void openEditor();
       return;
     }
 
     const vim = opts.editorMode === "vim";
     const pickerOpen = Boolean(filePicker) && (!vim || vimMode === "insert");
+    const commandOpen = Boolean(commandPicker) && (!vim || vimMode === "insert");
     const ch = keyChar(key);
+
+    if (commandOpen && commandPicker) {
+      if (key.name === "escape") {
+        setCommandDismissed(true);
+        setCommandPicker(null);
+        return;
+      }
+      if (key.name === "up" || key.name === "down") {
+        const delta = key.name === "up" ? -1 : 1;
+        setCommandPicker((p) =>
+          p && p.matches.length
+            ? { ...p, selected: (p.selected + delta + p.matches.length) % p.matches.length }
+            : p,
+        );
+        return;
+      }
+      if (key.name === "tab") {
+        const command = commandPicker.matches[commandPicker.selected];
+        if (command) {
+          const completed = `/${command.name}${command.args ? " " : ""}`;
+          setBuffer(createBuffer(completed));
+          setCommandDismissed(Boolean(command.args));
+        }
+        return;
+      }
+    }
 
     if (pickerOpen && filePicker) {
       if (key.name === "escape") {
@@ -251,9 +335,7 @@ export function usePromptInput(opts: Options) {
         }
       }
       if (key.name === "return" && filePicker.matches.length === 0 && !key.shift) {
-        const value = buffer.value;
-        resetBuffer();
-        opts.onSubmit(value);
+        submit(buffer.value);
         return;
       }
       if (key.name === "tab") return;
@@ -285,9 +367,7 @@ export function usePromptInput(opts: Options) {
     }
 
     if (key.name === "return") {
-      const value = buffer.value;
-      resetBuffer();
-      opts.onSubmit(value);
+      submit(buffer.value);
       return;
     }
 
@@ -373,8 +453,29 @@ export function usePromptInput(opts: Options) {
 
     if (pickerOpen && (key.name === "up" || key.name === "down")) return;
 
+    // At the buffer's edges the arrows recall earlier prompts instead of doing
+    // nothing; inside a multi-line draft they still move the cursor.
+    if (key.name === "up" && onFirstLine(buffer)) {
+      const step = historyPrevious(historyRef.current, buffer.value);
+      setHistory(step.history);
+      if (step.value !== null) {
+        setBuffer(createBuffer(step.value));
+        return;
+      }
+    }
+    if (key.name === "down" && onLastLine(buffer)) {
+      const step = historyNext(historyRef.current);
+      setHistory(step.history);
+      if (step.value !== null) {
+        setBuffer(createBuffer(step.value));
+        return;
+      }
+    }
+
     if (key.name === "backspace" || key.name === "delete" || ch) {
       setPickerDismissed(false);
+      setCommandDismissed(false);
+      setHistory((h) => release(h));
     }
 
     setBuffer((b) => {
@@ -392,6 +493,7 @@ export function usePromptInput(opts: Options) {
     vimMode: opts.editorMode === "vim" ? vimMode : "insert",
     pasteHint,
     filePicker,
+    commandPicker,
     resetBuffer,
     setValue,
     setBuffer,

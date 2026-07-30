@@ -10,7 +10,7 @@ import {
   useTerminalDimensions,
 } from "@opentui/react";
 import type { ModelMessage } from "ai";
-import { compactMessages } from "../agent/compact.ts";
+import { compactMessages, estimateTokens } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
 import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
@@ -18,17 +18,22 @@ import type { AgentMode, AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
 import { allowAll } from "../tools/permissions.ts";
+import { CommandPicker, commandPickerRows } from "./CommandPicker.tsx";
+import { findCommand, helpText, parseCommand } from "./commands.ts";
 import { ConfigPanel } from "./ConfigPanel.tsx";
 import { Footer, footerHeight } from "./Footer.tsx";
 import { FilePicker, filePickerRows } from "./FilePicker.tsx";
-import { Header, headerHeight } from "./Header.tsx";
 import {
   InputBox,
+  PERMISSION_CHOICES,
+  PLAN_CHOICES,
   inputContentRows,
   permissionContentRows,
   planReviewContentRows,
 } from "./InputBox.tsx";
 import { Timeline } from "./Timeline.tsx";
+import { Welcome, welcomeHeight } from "./Welcome.tsx";
+import { Working, workingHeight } from "./Working.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
 import { colors } from "./theme.ts";
@@ -69,6 +74,16 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const abortRef = useRef<AbortController | null>(null);
   // Session-scoped: a grant made with [A] must outlive the turn it came from.
   const alwaysAllowedRef = useRef(new Set<string>());
+  const [pendingChoice, setPendingChoice] = useState(0);
+  const [planChoice, setPlanChoice] = useState(0);
+  const [expandTools, setExpandTools] = useState(false);
+  const [startedAt, setStartedAt] = useState(0);
+  const [contextUsed, setContextUsed] = useState(0);
+  const [queued, setQueued] = useState(0);
+  const queuedRef = useRef<string[]>([]);
+  const [exitArmed, setExitArmed] = useState(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [resumedCount, setResumedCount] = useState(0);
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
   const messagesRef = useRef<ModelMessage[]>([]);
@@ -220,6 +235,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const askPermission = useCallback(
     (toolName: string, detail: string, preview?: string) => {
       if (yes) return allowAll(toolName, detail, preview);
+      setPendingChoice(0);
       return new Promise<PermissionDecision>((resolve) => {
         setPendingPermission({ toolName, detail, preview, resolve });
       });
@@ -227,42 +243,109 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     [yes],
   );
 
+  const resolvePermission = useCallback(
+    (decision: PermissionDecision) => {
+      pendingPermission?.resolve(decision);
+      setPendingPermission(null);
+      setPendingChoice(0);
+    },
+    [pendingPermission],
+  );
+
   const submit = useCallback(
-    async (text: string) => {
-      if (!text.trim() || busy) return;
+    async (text: string, fromQueue = false) => {
+      if (!text.trim()) return;
       const revisingPlan = planReview?.phase === "denying";
-      if (text === "/exit") {
-        exit();
+
+      // A message typed while the agent is working waits its turn instead of
+      // being dropped on the floor. It is shown now, in the order it was typed,
+      // and replayed without a second echo once the turn ends.
+      if (busy) {
+        queuedRef.current.push(text);
+        setQueued(queuedRef.current.length);
+        push({ kind: "user", id: nextId("u"), text });
         return;
       }
-      if (!revisingPlan && text === "/config") {
-        setShowConfig(true);
-        return;
-      }
-      if (!revisingPlan && text === "/retry") {
-        void checkConnection();
-        return;
-      }
-      if (!revisingPlan && text.startsWith("/mode ")) {
-        const m = text.slice(6).trim();
-        if (m === "plan" || m === "build") {
-          applyMode(m);
+
+      const command = revisingPlan ? null : parseCommand(text);
+      if (command) {
+        const known = findCommand(command.name);
+        if (!known) {
+          push(
+            {
+              kind: "error",
+              id: nextId("e"),
+              text: `Unknown command: /${command.name}. Enter /help to see what is available.`,
+            },
+            false,
+          );
+          return;
         }
-        return;
-      }
-      if (!revisingPlan && text === "/compact") {
-        const next = compactMessages(
-          messagesRef.current,
-          configRef.current.contextLength,
-          8,
-        );
-        messagesRef.current = next;
-        push({
-          kind: "status",
-          id: nextId("s"),
-          text: `compacted to ${next.length} messages`,
-        });
-        return;
+        switch (command.name) {
+          case "exit":
+            exit();
+            return;
+          case "config":
+            setShowConfig(true);
+            return;
+          case "retry":
+            void checkConnection();
+            return;
+          case "help":
+            push({ kind: "assistant", id: nextId("a"), text: helpText() }, false);
+            return;
+          case "clear":
+            messagesRef.current = [];
+            setItems([]);
+            push({ kind: "status", id: nextId("s"), text: "context cleared" }, false);
+            return;
+          case "status":
+            push(
+              {
+                kind: "assistant",
+                id: nextId("a"),
+                text: [
+                  `- **model** ${configRef.current.model}`,
+                  `- **mode** ${configRef.current.mode}`,
+                  `- **server** ${configRef.current.baseURL} (${serverReady ? "online" : "offline"})`,
+                  `- **context** ${estimateTokens(messagesRef.current)} of ${configRef.current.contextLength} estimated tokens`,
+                  `- **session** ${session.id}`,
+                  `- **cwd** ${cwd}`,
+                ].join("\n"),
+              },
+              false,
+            );
+            return;
+          case "mode": {
+            if (command.args === "plan" || command.args === "build") {
+              applyMode(command.args);
+            } else {
+              push(
+                { kind: "error", id: nextId("e"), text: "Usage: /mode plan|build" },
+                false,
+              );
+            }
+            return;
+          }
+          case "compact": {
+            const before = messagesRef.current.length;
+            const next = compactMessages(
+              messagesRef.current,
+              configRef.current.contextLength,
+              8,
+            );
+            messagesRef.current = next;
+            push({
+              kind: "status",
+              id: nextId("s"),
+              text:
+                next.length === before
+                  ? `nothing to compact — ${before} messages are within the context budget`
+                  : `compacted ${before} messages to ${next.length}`,
+            });
+            return;
+          }
+        }
       }
 
       if (!serverReady) {
@@ -278,6 +361,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       }
 
       setBusy(true);
+      setStartedAt(Date.now());
       cancelLiveRender();
       setStreaming("");
       setThinking("");
@@ -288,11 +372,13 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         ? `The previous implementation plan was declined. Revise this structured plan in response to the feedback:\n\n${formatReviewedPlan(planReview!.plan)}\n\nFeedback:\n${modelText}`
         : modelText;
       if (revisingPlan) setPlanReview(null);
-      push({
-        kind: "user",
-        id: nextId("u"),
-        text: revisingPlan ? `Plan feedback: ${displayText}` : displayText,
-      });
+      if (!fromQueue) {
+        push({
+          kind: "user",
+          id: nextId("u"),
+          text: revisingPlan ? `Plan feedback: ${displayText}` : displayText,
+        });
+      }
       const userMsg: ModelMessage = { role: "user", content: request };
       const nextMessages = [...messagesRef.current, userMsg];
       messagesRef.current = nextMessages;
@@ -333,6 +419,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           toolInputsRef.current.delete(event.id);
           upsertTool(nextItem);
           recordTimeline(nextItem);
+        } else if (event.type === "todos") {
+          flushLive();
+          push({ kind: "todos", id: nextId("t"), todos: event.todos });
         } else if (event.type === "status") {
           push({ kind: "status", id: nextId("s"), text: event.message }, false);
         } else if (event.type === "error") {
@@ -380,6 +469,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       } finally {
         setBusy(false);
         abortRef.current = null;
+        setContextUsed(
+          estimateTokens(messagesRef.current) / Math.max(1, configRef.current.contextLength),
+        );
       }
     },
     [
@@ -400,6 +492,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       upsertTool,
     ],
   );
+
+  // Drain anything typed while the previous turn was running, oldest first.
+  useEffect(() => {
+    if (busy || queuedRef.current.length === 0) return;
+    const next = queuedRef.current.shift()!;
+    setQueued(queuedRef.current.length);
+    void submit(next, true);
+  }, [busy, submit]);
 
   const prompt = usePromptInput({
     busy,
@@ -434,16 +534,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       if (transcript.length > 0) {
         syncNextId(transcript);
         setItems(transcript);
-      } else if (loaded.length > 0) {
-        push(
-          {
-            kind: "status",
-            id: nextId("s"),
-            text: `resumed ${loaded.length} model messages; prior visual transcript is unavailable`,
-          },
-          false,
-        );
       }
+      if (loaded.length > 0) setResumedCount(loaded.length);
+      setContextUsed(estimateTokens(loaded) / Math.max(1, config.contextLength));
       const online = await checkConnection(config);
       if (online && initialPrompt && !startedRef.current) {
         startedRef.current = true;
@@ -455,13 +548,19 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
   const pasteExtra = prompt.pasteHint ? 1 : 0;
-  const pickerExtra = prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0;
+  const planDenyExtra = planReview?.phase === "denying" ? 1 : 0;
+  const pickerExtra =
+    (prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0) +
+    (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0);
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80)
-    : planReview
-      ? planReviewContentRows(planReview.phase, prompt.buffer.value, columns || 80)
-      : inputContentRows(prompt.buffer.value, columns || 80) + vimExtra + pasteExtra;
-  const inputRows = inputContent + 2 + pickerExtra;
+    : planReview?.phase === "ready"
+      ? planReviewContentRows("ready", prompt.buffer.value, columns || 80)
+      : inputContentRows(prompt.buffer.value, columns || 80) +
+        vimExtra +
+        pasteExtra +
+        planDenyExtra;
+  const inputRows = inputContent + 2 + pickerExtra + (busy ? workingHeight() : 0);
   const footerState = {
     busy,
     editorMode: config.ui.editorMode,
@@ -469,35 +568,75 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     showConfig,
     browsingHistory,
     filePicker: Boolean(prompt.filePicker),
+    commandPicker: Boolean(prompt.commandPicker),
     planReview: planReview?.phase,
+    queued,
   };
-  const chrome =
-    headerHeight(status, columns || 80) +
-    (showConfig ? 0 : inputRows) +
-    footerHeight(footerState, columns || 80);
+  const chrome = (showConfig ? 0 : inputRows) + footerHeight();
   const timelineLines = Math.max(showConfig ? 2 : 3, (rows || 24) - chrome);
 
+  const armExit = useCallback(() => {
+    if (exitArmed) {
+      exit();
+      return;
+    }
+    setExitArmed(true);
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    exitTimerRef.current = setTimeout(() => setExitArmed(false), 2_000);
+  }, [exit, exitArmed]);
+
+  useEffect(() => () => {
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+  }, []);
+
   useKeyboard((key) => {
+    // Ctrl+C never exits on the first press: an accidental one mid-session
+    // used to take the whole transcript with it.
+    if (key.ctrl && key.name === "c") {
+      if (busy) {
+        abortRef.current?.abort();
+        return;
+      }
+      armExit();
+      return;
+    }
+    if (exitArmed) setExitArmed(false);
+
     if (pendingPermission) {
       const ch = keyChar(key);
-      if (ch === "a") {
-        pendingPermission.resolve("allow");
-        setPendingPermission(null);
-      } else if (ch === "A") {
-        pendingPermission.resolve("always");
-        setPendingPermission(null);
-      } else if (ch === "d" || ch === "n") {
-        pendingPermission.resolve("deny");
-        setPendingPermission(null);
+      if (key.name === "up" || key.name === "down") {
+        const delta = key.name === "up" ? -1 : 1;
+        setPendingChoice(
+          (value) =>
+            (value + delta + PERMISSION_CHOICES.length) % PERMISSION_CHOICES.length,
+        );
+      } else if (key.name === "return") {
+        resolvePermission(PERMISSION_CHOICES[pendingChoice] ?? "deny");
+      } else if (key.name === "escape") {
+        resolvePermission("deny");
+      } else if (ch === "1" || ch === "a") {
+        resolvePermission("allow");
+      } else if (ch === "2" || ch === "A") {
+        resolvePermission("always");
+      } else if (ch === "3" || ch === "d" || ch === "n") {
+        resolvePermission("deny");
       }
       return;
     }
+
     if (planReview?.phase === "ready") {
       const ch = keyChar(key);
-      if (ch === "a") {
+      const decline = () => setPlanReview({ ...planReview, phase: "denying" });
+      if (key.name === "up" || key.name === "down") {
+        const delta = key.name === "up" ? -1 : 1;
+        setPlanChoice((value) => (value + delta + PLAN_CHOICES.length) % PLAN_CHOICES.length);
+      } else if (key.name === "return") {
+        if ((PLAN_CHOICES[planChoice] ?? "approve") === "approve") approvePlan();
+        else decline();
+      } else if (ch === "1" || ch === "a") {
         approvePlan();
-      } else if (ch === "d" || ch === "n") {
-        setPlanReview({ ...planReview, phase: "denying" });
+      } else if (ch === "2" || ch === "d" || ch === "n" || key.name === "escape") {
+        decline();
       }
       return;
     }
@@ -507,6 +646,11 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       return;
     }
     if (showConfig) return;
+
+    if (key.ctrl && key.name === "o") {
+      setExpandTools((value) => !value);
+      return;
+    }
 
     if (key.name === "pageup") {
       const step = Math.max(1, Math.floor(timelineLines * 0.8));
@@ -520,13 +664,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   });
 
   return (
-    <box
-      flexDirection="column"
-      width="100%"
-      height={rows || undefined}
-      backgroundColor={colors.canvas}
-    >
-      <Header status={status} columns={columns || 80} />
+    // No background fill: the UI draws over whatever the user's terminal theme
+    // already provides, the way Claude Code does.
+    <box flexDirection="column" width="100%" height={rows || undefined}>
       {!showConfig ? (
         <box flexGrow={1} flexDirection="column" height={timelineLines}>
           <Timeline
@@ -534,6 +674,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             columns={columns || 80}
             thinking={thinking}
             streaming={streaming}
+            expandAll={expandTools}
+            welcome={
+              <Welcome cwd={cwd} model={config.model} resumed={resumedCount || undefined} />
+            }
             scrollRef={scrollRef}
           />
         </box>
@@ -554,11 +698,25 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         />
       ) : (
         <>
+          {busy ? (
+            <Working
+              startedAt={startedAt}
+              tokens={estimateTokens(messagesRef.current)}
+              queued={queued}
+            />
+          ) : null}
           {prompt.filePicker ? (
             <FilePicker
               matches={prompt.filePicker.matches}
               selected={prompt.filePicker.selected}
               query={prompt.filePicker.query}
+              columns={columns || 80}
+            />
+          ) : null}
+          {prompt.commandPicker ? (
+            <CommandPicker
+              matches={prompt.commandPicker.matches}
+              selected={prompt.commandPicker.selected}
               columns={columns || 80}
             />
           ) : null}
@@ -568,8 +726,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             busy={busy}
             vimMode={prompt.vimMode}
             editorMode={config.ui.editorMode}
-            pasteHint={prompt.pasteHint}
+            pasteHint={prompt.pasteHint ?? (exitArmed ? "press ctrl+c again to exit" : null)}
             planReview={planReview?.phase}
+            planChoice={planChoice}
+            pendingChoice={pendingChoice}
             columns={columns || 80}
             pending={
               pendingPermission
@@ -585,7 +745,16 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       )}
       {/* Spread the same state used to reserve the footer's height, so what is
           drawn and what was measured cannot drift apart. */}
-      <Footer {...footerState} columns={columns || 80} />
+      <Footer
+        {...footerState}
+        columns={columns || 80}
+        status={{
+          mode: config.mode,
+          model: config.model,
+          contextUsed,
+          online: serverReady,
+        }}
+      />
     </box>
   );
 }

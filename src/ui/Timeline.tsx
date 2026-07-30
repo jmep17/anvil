@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type Ref } from "react";
+import { memo, useMemo, useState, type ReactNode, type Ref } from "react";
 import {
   MouseButton,
   TextAttributes,
@@ -8,270 +8,42 @@ import {
   formatToolDuration,
   formatToolInput,
   summarizeToolInput,
+  summarizeToolResult,
   wrapDisplayLines,
 } from "./format.ts";
 import { colors, getMarkdownSyntaxStyle } from "./theme.ts";
-import type { TimelineItem } from "./types.ts";
-
-type Tone =
-  | "user"
-  | "assistant"
-  | "plan"
-  | "clarification"
-  | "thinking"
-  | "tool-running"
-  | "tool-done"
-  | "tool-error"
-  | "status"
-  | "error";
-
-interface DisplayLine {
-  key: string;
-  text: string;
-  tone: Tone;
-}
-
-const TONE_FG: Record<Tone, string | undefined> = {
-  user: colors.cyan,
-  assistant: colors.text,
-  plan: colors.green,
-  clarification: colors.yellow,
-  thinking: colors.gray,
-  "tool-running": colors.yellow,
-  "tool-done": colors.green,
-  "tool-error": colors.red,
-  status: colors.gray,
-  error: colors.red,
-};
-
-function appendWrapped(
-  lines: DisplayLine[],
-  key: string,
-  text: string,
-  tone: Tone,
-  width: number,
-  prefix = "│  ",
-): void {
-  for (const [index, line] of wrapDisplayLines(text, width).entries()) {
-    lines.push({ key: `${key}-${index}`, text: `${prefix}${line || " "}`, tone });
-  }
-}
-
-function appendTool(
-  lines: DisplayLine[],
-  item: Extract<TimelineItem, { kind: "tool" }>,
-  width: number,
-): void {
-  const tone: Tone =
-    item.status === "running"
-      ? "tool-running"
-      : item.status === "done"
-        ? "tool-done"
-        : "tool-error";
-  const state =
-    item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
-  const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
-  const duration = formatToolDuration(item.ms);
-  appendWrapped(
-    lines,
-    `${item.id}-title`,
-    `╭─ ${icon} ${item.name} · ${state}${duration ? ` · ${duration}` : ""}`,
-    tone,
-    width,
-    "",
-  );
-  lines.push({ key: `${item.id}-input-label`, text: "│  input", tone: "status" });
-  appendWrapped(lines, `${item.id}-input`, formatToolInput(item.input), "status", width);
-  if (item.output != null) {
-    lines.push({ key: `${item.id}-output-label`, text: "│  output", tone: "status" });
-    appendWrapped(lines, `${item.id}-output`, item.output, tone, width);
-  }
-  lines.push({ key: `${item.id}-end`, text: "╰─", tone });
-}
-
-function appendItem(lines: DisplayLine[], item: TimelineItem, width: number): void {
-  switch (item.kind) {
-    case "user":
-      lines.push({ key: `${item.id}-title`, text: "╭─ you", tone: "user" });
-      appendWrapped(lines, item.id, item.text, "user", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "user" });
-      return;
-    case "assistant":
-      lines.push({ key: `${item.id}-title`, text: "╭─ ✦ anvil", tone: "assistant" });
-      appendWrapped(lines, item.id, item.text, "assistant", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "assistant" });
-      return;
-    case "plan":
-      lines.push({ key: `${item.id}-title`, text: "╭─ ✓ plan for review", tone: "plan" });
-      appendWrapped(lines, item.id, item.text, "plan", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "plan" });
-      return;
-    case "clarification":
-      lines.push({ key: `${item.id}-title`, text: "╭─ ? clarification needed", tone: "clarification" });
-      appendWrapped(lines, item.id, item.text, "clarification", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "clarification" });
-      return;
-    case "thinking":
-      lines.push({ key: `${item.id}-title`, text: "╭─ thinking", tone: "thinking" });
-      appendWrapped(lines, item.id, item.text, "thinking", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "thinking" });
-      return;
-    case "tool":
-      appendTool(lines, item, width);
-      return;
-    case "status":
-      appendWrapped(lines, item.id, `· ${item.text}`, "status", width, "  ");
-      return;
-    case "error":
-      lines.push({ key: `${item.id}-title`, text: "╭─ ✕ error", tone: "error" });
-      appendWrapped(lines, item.id, item.text, "error", width);
-      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "error" });
-      return;
-  }
-}
-
-export function buildTranscriptLines(
-  items: TimelineItem[],
-  columns: number,
-  thinking?: string,
-  streaming?: string,
-): DisplayLine[] {
-  const width = Math.max(12, columns - 4);
-  const lines: DisplayLine[] = [];
-  for (const item of items) appendItem(lines, item, width);
-  if (thinking) appendItem(lines, { kind: "thinking", id: "live-thinking", text: thinking }, width);
-  if (streaming) appendItem(lines, { kind: "assistant", id: "live-response", text: streaming }, width);
-  return lines;
-}
+import type { TimelineItem, ToolStatus } from "./types.ts";
 
 /**
- * Keep the streaming surface deliberately plain. Incremental Markdown parsing
- * can restyle earlier rows as an unfinished construct becomes valid, which is
- * highly visible in a terminal renderer. Completed messages still use the
- * full Markdown treatment below.
+ * Transcript glyphs. A tool call is a bullet with its result hanging beneath it
+ * on a corner, so the eye follows one column instead of a stack of boxes.
  */
-export function streamDisplayLines(text: string, columns: number): string[] {
-  return wrapDisplayLines(text, Math.max(12, columns - 6));
+const BULLET = "⏺";
+const CORNER = "⎿";
+const THINKING = "✻";
+
+/** Width reserved by `CORNER` plus its padding, so wrapped output stays aligned. */
+const RESULT_INDENT = "     ";
+
+function statusColor(status: ToolStatus): string {
+  return status === "running" ? colors.accent : status === "done" ? colors.success : colors.danger;
 }
 
-const PlainBlock = memo(function PlainBlock({
-  title,
-  body,
-  tone,
-  width,
-}: {
-  title: string;
-  body: string;
-  tone: Tone;
-  width: number;
-}) {
-  const fg = TONE_FG[tone];
-  const dim =
-    tone === "thinking" || tone === "status"
-      ? TextAttributes.DIM | (tone === "thinking" ? TextAttributes.ITALIC : 0)
-      : TextAttributes.NONE;
-  const wrapped = wrapDisplayLines(body, width);
+/** `Read(src/ui/App.tsx)` — the call as the user would have written it. */
+function toolTitle(name: string, input: unknown, width: number): string {
+  const summary = summarizeToolInput(input, Math.max(12, width - name.length - 4));
+  return summary ? `${name}(${summary})` : name;
+}
+
+const UserTurn = memo(function UserTurn({ text, width }: { text: string; width: number }) {
+  const lines = wrapDisplayLines(text, Math.max(12, width - 2));
   return (
-    <box
-      flexDirection="column"
-      width="100%"
-      flexShrink={0}
-      border={["left"]}
-      borderColor={fg}
-      paddingLeft={1}
-    >
-      <text fg={fg} attributes={TextAttributes.BOLD | dim}>
-        {title}
-      </text>
-      {wrapped.map((line, index) => (
-        <text key={index} fg={fg} attributes={dim}>
-          {`│  ${line || " "}`}
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      {lines.map((line, index) => (
+        <text key={index} fg={colors.muted}>
+          {`${index === 0 ? "> " : "  "}${line || " "}`}
         </text>
       ))}
-    </box>
-  );
-});
-
-const ToolBlock = memo(function ToolBlock({
-  item,
-  width,
-}: {
-  item: Extract<TimelineItem, { kind: "tool" }>;
-  width: number;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const tone: Tone =
-    item.status === "running"
-      ? "tool-running"
-      : item.status === "done"
-        ? "tool-done"
-        : "tool-error";
-  const fg = TONE_FG[tone];
-  const state =
-    item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
-  const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
-  const duration = formatToolDuration(item.ms);
-  const chevron = expanded ? "▾" : "▸";
-  const title = `${chevron} ${icon} ${item.name}`;
-  const summary = summarizeToolInput(item.input, Math.max(16, width - 2));
-
-  return (
-    <box
-      flexDirection="column"
-      width="100%"
-      flexShrink={0}
-      border={["left"]}
-      borderColor={fg}
-      paddingLeft={1}
-    >
-      <box
-        flexDirection="row"
-        width="100%"
-        flexShrink={0}
-        onMouseDown={(event) => {
-          if (event.button !== MouseButton.LEFT) return;
-          event.stopPropagation();
-          setExpanded((value) => !value);
-        }}
-      >
-        <text fg={fg} attributes={TextAttributes.BOLD}>{title}</text>
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
-          {`  ${state}${duration ? ` · ${duration}` : ""}`}
-        </text>
-        <box flexGrow={1} />
-        <text fg={expanded ? colors.cyan : colors.muted} attributes={TextAttributes.DIM}>
-          {expanded ? "details" : "click to inspect"}
-        </text>
-      </box>
-      {!expanded && summary ? (
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
-          {`  ${summary}`}
-        </text>
-      ) : null}
-      {expanded ? (
-        <>
-          <text fg={colors.gray} attributes={TextAttributes.DIM}>
-            INPUT
-          </text>
-          {wrapDisplayLines(formatToolInput(item.input), width).map((line, index) => (
-            <text key={`in-${index}`} fg={colors.gray} attributes={TextAttributes.DIM}>
-              {`  ${line || " "}`}
-            </text>
-          ))}
-          {item.output != null ? (
-            <>
-              <text fg={colors.gray} attributes={TextAttributes.DIM}>
-                OUTPUT
-              </text>
-              {wrapDisplayLines(item.output, width).map((line, index) => (
-                <text key={`out-${index}`} fg={fg}>
-                  {`  ${line || " "}`}
-                </text>
-              ))}
-            </>
-          ) : null}
-        </>
-      ) : null}
     </box>
   );
 });
@@ -279,61 +51,192 @@ const ToolBlock = memo(function ToolBlock({
 const AssistantMarkdown = memo(function AssistantMarkdown({
   text,
   streaming,
-  title = "✦ ANVIL",
-  borderColor = colors.purple,
 }: {
   text: string;
   streaming?: boolean;
-  title?: string;
-  borderColor?: string;
 }) {
   const syntaxStyle = useMemo(() => getMarkdownSyntaxStyle(), []);
   return (
-    <box
-      flexDirection="column"
-      width="100%"
-      flexShrink={0}
-      border={["left"]}
-      borderColor={borderColor}
-      paddingLeft={1}
-    >
-      <text fg={borderColor} attributes={TextAttributes.BOLD}>{title}</text>
-      <box paddingLeft={2} width="100%">
-        <markdown
-          content={text}
-          syntaxStyle={syntaxStyle}
-          conceal
-          streaming={Boolean(streaming)}
-          width="100%"
-        />
-      </box>
+    <box flexDirection="column" width="100%" flexShrink={0} paddingLeft={2}>
+      <markdown
+        content={text}
+        syntaxStyle={syntaxStyle}
+        conceal
+        streaming={Boolean(streaming)}
+        width="100%"
+      />
     </box>
   );
 });
 
-const LiveAssistantText = memo(function LiveAssistantText({
+/** A labelled markdown block — used where the content needs a heading (plans). */
+const LabelledMarkdown = memo(function LabelledMarkdown({
+  label,
   text,
-  columns,
+  fg,
 }: {
+  label: string;
   text: string;
-  columns: number;
+  fg: string;
 }) {
-  const lines = useMemo(() => streamDisplayLines(text, columns), [columns, text]);
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={fg} attributes={TextAttributes.BOLD}>
+        {`${BULLET} ${label}`}
+      </text>
+      <AssistantMarkdown text={text} />
+    </box>
+  );
+});
+
+const Thinking = memo(function Thinking({ text, width }: { text: string; width: number }) {
+  const lines = wrapDisplayLines(text, Math.max(12, width - 2));
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={colors.muted} attributes={TextAttributes.DIM | TextAttributes.ITALIC}>
+        {`${THINKING} Thinking…`}
+      </text>
+      {lines.map((line, index) => (
+        <text key={index} fg={colors.faint} attributes={TextAttributes.DIM | TextAttributes.ITALIC}>
+          {`  ${line || " "}`}
+        </text>
+      ))}
+    </box>
+  );
+});
+
+const TODO_MARK: Record<string, string> = {
+  pending: "☐",
+  in_progress: "◐",
+  completed: "☒",
+  cancelled: "☓",
+};
+
+const Todos = memo(function Todos({
+  todos,
+  width,
+}: {
+  todos: Extract<TimelineItem, { kind: "todos" }>["todos"];
+  width: number;
+}) {
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={colors.success} attributes={TextAttributes.BOLD}>
+        {`${BULLET} Update Todos`}
+      </text>
+      {todos.map((todo, index) => {
+        const mark = TODO_MARK[todo.status] ?? "☐";
+        const done = todo.status === "completed" || todo.status === "cancelled";
+        const prefix = index === 0 ? `  ${CORNER}  ` : RESULT_INDENT;
+        const lines = wrapDisplayLines(todo.content, Math.max(12, width - prefix.length - 2));
+        return lines.map((line, lineIndex) => (
+          <text
+            key={`${todo.id}-${lineIndex}`}
+            fg={done ? colors.faint : todo.status === "in_progress" ? colors.accent : colors.muted}
+            attributes={done ? TextAttributes.DIM | TextAttributes.STRIKETHROUGH : TextAttributes.NONE}
+          >
+            {`${lineIndex === 0 ? prefix : `${RESULT_INDENT}  `}${lineIndex === 0 ? `${mark} ` : ""}${line}`}
+          </text>
+        ));
+      })}
+    </box>
+  );
+});
+
+const ToolRow = memo(function ToolRow({
+  item,
+  width,
+  expandAll,
+}: {
+  item: Extract<TimelineItem, { kind: "tool" }>;
+  width: number;
+  expandAll: boolean;
+}) {
+  const [expandedSelf, setExpandedSelf] = useState(false);
+  const expanded = expandAll || expandedSelf;
+  const fg = statusColor(item.status);
+  const duration = formatToolDuration(item.ms);
+  const title = toolTitle(item.name, item.input, width);
+  const summary =
+    item.status === "running"
+      ? "running…"
+      : summarizeToolResult(item.name, item.output, item.status === "error");
+
   return (
     <box
       flexDirection="column"
       width="100%"
       flexShrink={0}
-      border={["left"]}
-      borderColor={colors.purple}
-      paddingLeft={1}
+      onMouseDown={(event) => {
+        if (event.button !== MouseButton.LEFT) return;
+        event.stopPropagation();
+        setExpandedSelf((value) => !value);
+      }}
     >
-      <text fg={colors.purple} attributes={TextAttributes.BOLD}>
-        ✦ ANVIL
+      <box flexDirection="row" width="100%" flexShrink={0}>
+        <text fg={fg}>{`${BULLET} `}</text>
+        <text fg={colors.text} attributes={TextAttributes.BOLD}>
+          {title}
+        </text>
+        {duration ? (
+          <text fg={colors.faint} attributes={TextAttributes.DIM}>{`  ${duration}`}</text>
+        ) : null}
+      </box>
+
+      {!expanded ? (
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          {`  ${CORNER}  ${summary}${item.output ? "  (ctrl+o to expand)" : ""}`}
+        </text>
+      ) : (
+        <>
+          <text fg={colors.muted} attributes={TextAttributes.DIM}>
+            {`  ${CORNER}  ${item.name} input`}
+          </text>
+          {wrapDisplayLines(formatToolInput(item.input), Math.max(12, width - 8)).map(
+            (line, index) => (
+              <text key={`in-${index}`} fg={colors.faint} attributes={TextAttributes.DIM}>
+                {`${RESULT_INDENT}${line || " "}`}
+              </text>
+            ),
+          )}
+          {item.output != null ? (
+            wrapDisplayLines(item.output, Math.max(12, width - 8)).map((line, index) => (
+              <text
+                key={`out-${index}`}
+                fg={item.status === "error" ? colors.danger : colors.muted}
+              >
+                {`${RESULT_INDENT}${line || " "}`}
+              </text>
+            ))
+          ) : null}
+        </>
+      )}
+    </box>
+  );
+});
+
+const ErrorRow = memo(function ErrorRow({ text, width }: { text: string; width: number }) {
+  const lines = wrapDisplayLines(text, Math.max(12, width - 6));
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={colors.danger} attributes={TextAttributes.BOLD}>
+        {`${BULLET} Error`}
       </text>
       {lines.map((line, index) => (
-        <text key={index} fg={colors.text}>
-          {`  ${line || " "}`}
+        <text key={index} fg={colors.danger}>
+          {`  ${index === 0 ? `${CORNER}  ` : "   "}${line || " "}`}
+        </text>
+      ))}
+    </box>
+  );
+});
+
+const StatusRow = memo(function StatusRow({ text, width }: { text: string; width: number }) {
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      {wrapDisplayLines(text, Math.max(12, width - 4)).map((line, index) => (
+        <text key={index} fg={colors.faint} attributes={TextAttributes.DIM}>
+          {`  ${index === 0 ? "· " : "  "}${line}`}
         </text>
       ))}
     </box>
@@ -343,42 +246,33 @@ const LiveAssistantText = memo(function LiveAssistantText({
 const TimelineItemView = memo(function TimelineItemView({
   item,
   width,
+  expandAll,
 }: {
   item: TimelineItem;
   width: number;
+  expandAll: boolean;
 }) {
   switch (item.kind) {
     case "user":
-      return <PlainBlock title="YOU" body={item.text} tone="user" width={width} />;
+      return <UserTurn text={item.text} width={width} />;
     case "assistant":
       return <AssistantMarkdown text={item.text} />;
     case "plan":
-      return <AssistantMarkdown text={item.text} title="✓ PLAN FOR REVIEW" borderColor={colors.green} />;
+      return <LabelledMarkdown label="Plan for review" text={item.text} fg={colors.success} />;
     case "clarification":
-      return <PlainBlock title="? CLARIFICATION NEEDED" body={item.text} tone="clarification" width={width} />;
-    case "thinking":
-      return <PlainBlock title="THINKING" body={item.text} tone="thinking" width={width} />;
-    case "tool":
-      return <ToolBlock item={item} width={width} />;
-    case "status":
       return (
-        <box
-          flexDirection="column"
-          width="100%"
-          flexShrink={0}
-          border={["left"]}
-          borderColor={colors.borderMuted}
-          paddingLeft={1}
-        >
-          {wrapDisplayLines(`· ${item.text}`, width).map((line, index) => (
-            <text key={index} fg={colors.gray} attributes={TextAttributes.DIM}>
-              {`  ${line}`}
-            </text>
-          ))}
-        </box>
+        <LabelledMarkdown label="Clarification needed" text={item.text} fg={colors.warning} />
       );
+    case "thinking":
+      return <Thinking text={item.text} width={width} />;
+    case "todos":
+      return <Todos todos={item.todos} width={width} />;
+    case "tool":
+      return <ToolRow item={item} width={width} expandAll={expandAll} />;
+    case "status":
+      return <StatusRow text={item.text} width={width} />;
     case "error":
-      return <PlainBlock title="✕ ERROR" body={item.text} tone="error" width={width} />;
+      return <ErrorRow text={item.text} width={width} />;
   }
 });
 
@@ -387,12 +281,17 @@ export const Timeline = memo(function Timeline({
   columns,
   thinking,
   streaming,
+  expandAll,
+  welcome,
   scrollRef,
 }: {
   items: TimelineItem[];
   columns: number;
   thinking?: string;
   streaming?: string;
+  expandAll?: boolean;
+  /** Rendered above the first item and scrolled away with it. */
+  welcome?: ReactNode;
   scrollRef?: Ref<ScrollBoxRenderable>;
 }) {
   const width = Math.max(12, columns - 4);
@@ -412,26 +311,24 @@ export const Timeline = memo(function Timeline({
         contentOptions: { flexDirection: "column", width: "100%", gap: 1 },
         scrollbarOptions: {
           trackOptions: {
-            foregroundColor: colors.magenta,
-            backgroundColor: colors.muted,
+            foregroundColor: colors.accentDim,
+            backgroundColor: colors.borderMuted,
           },
         },
       }}
     >
+      {welcome}
       {items.map((item) => (
-        <TimelineItemView key={item.id} item={item} width={width} />
-      ))}
-      {thinking ? (
-        <PlainBlock
-          key="live-thinking"
-          title="╭─ thinking"
-          body={thinking}
-          tone="thinking"
+        <TimelineItemView
+          key={item.id}
+          item={item}
           width={width}
+          expandAll={Boolean(expandAll)}
         />
-      ) : null}
+      ))}
+      {thinking ? <Thinking key="live-thinking" text={thinking} width={width} /> : null}
       {streaming ? (
-        <LiveAssistantText key="live-response" text={streaming} columns={columns} />
+        <AssistantMarkdown key="live-response" text={streaming} streaming />
       ) : null}
     </scrollbox>
   );
