@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ReactNode } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { unifiedDiff } from "../fs/diff.ts";
-import { InputBox } from "./InputBox.tsx";
+import { InputBox, permissionContentRows } from "./InputBox.tsx";
 
 async function frameFor(
   element: ReactNode,
@@ -95,5 +95,79 @@ describe("InputBox", () => {
     expect(frame).toContain("Ready to implement this plan?");
     expect(frame).toContain("1. Yes, implement it");
     expect(frame).toContain("2. No, let me give feedback");
+  });
+});
+
+describe("approval prompt in limited space", () => {
+  const bigFile = Array.from({ length: 400 }, (_, i) => `const line${i} = ${i};`).join("\n");
+  const bigDiff = unifiedDiff("/repo/src/big.ts", bigFile, bigFile.replace("line0", "renamed"));
+
+  test("the options stay on screen for a very long file", async () => {
+    // A short terminal: the prompt must not push its own actions off the bottom.
+    const frame = await frameFor(
+      <InputBox
+        value=""
+        cursor={0}
+        busy={false}
+        columns={80}
+        maxRows={14}
+        pending={{ toolName: "Edit", detail: "/repo/src/big.ts", preview: bigDiff }}
+      />,
+      80,
+      14,
+    );
+
+    expect(frame).toContain("Do you want to make this edit?");
+    expect(frame).toContain("1. Yes");
+    expect(frame).toContain("3. No,");
+    // And it says what it left out rather than silently cutting.
+    expect(frame).toMatch(/more diff lines/);
+  });
+
+  test("with almost no room it falls back to a one-line summary", async () => {
+    const frame = await frameFor(
+      <InputBox
+        value=""
+        cursor={0}
+        busy={false}
+        columns={80}
+        maxRows={9}
+        pending={{ toolName: "Edit", detail: "/repo/src/big.ts", preview: bigDiff }}
+      />,
+      80,
+      9,
+    );
+
+    expect(frame).toContain("1. Yes");
+    expect(frame).toContain("3. No,");
+    expect(frame).toMatch(/addition|removal/);
+  });
+
+  test("the reserved height matches what is drawn", async () => {
+    for (const maxRows of [9, 12, 16, 24, 40]) {
+      const pending = { toolName: "Edit", detail: "/repo/src/big.ts", preview: bigDiff };
+      const rows = permissionContentRows(pending, 80, maxRows) + 2; // + border
+      expect(rows).toBeLessThanOrEqual(Math.max(10, maxRows));
+    }
+  });
+
+  test("a short diff is shown in full, with no truncation notice", async () => {
+    const small = unifiedDiff("/repo/a.ts", "one\ntwo\n", "one\nTWO\n");
+    const frame = await frameFor(
+      <InputBox
+        value=""
+        cursor={0}
+        busy={false}
+        columns={80}
+        maxRows={24}
+        pending={{ toolName: "Edit", detail: "/repo/a.ts", preview: small }}
+      />,
+      80,
+      24,
+    );
+    // The diff renderable puts the +/- sign in its own gutter column.
+    expect(frame).toMatch(/-\s+two/);
+    expect(frame).toMatch(/\+\s+TWO/);
+    expect(frame).not.toContain("more diff line");
   });
 });

@@ -4,6 +4,8 @@ import type { SkillInfo } from "../skills/types.ts";
 export interface SystemPromptOptions {
   cwd: string;
   mode: AgentMode;
+  /** Current date and time, already formatted for the configured zone. */
+  now: string;
   skills: SkillInfo[];
   /** Truncated combined repo context (ANVIL.md, .anvil/CONTEXT.md, local notes). */
   repoContext: string;
@@ -60,9 +62,11 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
 You work in the user's project directory and use tools to gather context, take action, and verify results.
 
 Working directory: ${opts.cwd}
+Current date and time: ${opts.now}
 Mode: ${opts.mode}${opts.mode === "plan" ? " (read-only: no Write/Edit/Bash)" : ""}
 
 Guidelines:
+- The date and time above are current and are refreshed every turn. Use them for anything time-relative ("today", "last week", version recency) rather than assuming your training cutoff is now.
 - Prefer Read/Glob/Grep over Bash for exploring code.
 - Read only the context needed for the next action. Do not repeat an identical Read unless a tool has changed that file or you need a different line range.
 - Keep reasoning concise and decision-oriented: Goal → Evidence → Decision → Next action. Preserve a decision unless new tool output directly contradicts it.

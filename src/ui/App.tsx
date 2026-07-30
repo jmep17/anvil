@@ -11,6 +11,7 @@ import {
 } from "@opentui/react";
 import type { ModelMessage } from "ai";
 import { compactMessages, estimateTokens } from "../agent/compact.ts";
+import { describeNow } from "../agent/datetime.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
 import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
@@ -336,6 +337,7 @@ export function App({
                   `- **mode** ${configRef.current.mode}`,
                   `- **server** ${configRef.current.baseURL} (${serverReady ? "online" : "offline"})`,
                   `- **context** ${estimateTokens(messagesRef.current)} of ${configRef.current.contextLength} estimated tokens`,
+                  `- **time** ${describeNow(new Date(), configRef.current.timezone)}`,
                   `- **session** ${session.id}`,
                   `- **cwd** ${cwd}`,
                 ].join("\n"),
@@ -616,8 +618,11 @@ export function App({
     (prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0) +
     (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0) +
     (sessionPicker ? sessionPickerRows(sessionPicker.sessions) : 0);
+  // What the approval prompt may occupy before it would squeeze the transcript
+  // to nothing and push its own options off the bottom.
+  const permissionMaxRows = Math.max(10, (rows || 24) - footerHeight() - 3);
   const inputContent = pendingPermission
-    ? permissionContentRows(pendingPermission, columns || 80)
+    ? permissionContentRows(pendingPermission, columns || 80, permissionMaxRows)
     : planReview?.phase === "ready"
       ? planReviewContentRows("ready", prompt.buffer.value, columns || 80)
       : inputContentRows(prompt.buffer.value, columns || 80) +
@@ -823,6 +828,7 @@ export function App({
             planChoice={planChoice}
             pendingChoice={pendingChoice}
             columns={columns || 80}
+            maxRows={permissionMaxRows}
             pending={
               pendingPermission
                 ? {

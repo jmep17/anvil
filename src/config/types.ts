@@ -1,3 +1,5 @@
+import { DEFAULT_TIMEZONE } from "../agent/datetime.ts";
+
 export type AgentMode = "plan" | "build";
 
 export interface McpServerConfig {
@@ -53,6 +55,11 @@ export interface UiConfig {
 
 export interface AnvilConfig {
   baseURL: string;
+  /**
+   * IANA zone the agent reports the current time in, or "auto" to follow the
+   * host. Defaults to UK time.
+   */
+  timezone: string;
   apiKey: string;
   model: string;
   contextLength: number;
@@ -86,6 +93,7 @@ export const DEFAULT_UI_CONFIG: UiConfig = {
 
 export const DEFAULT_CONFIG: AnvilConfig = {
   baseURL: "http://localhost:1234/v1",
+  timezone: DEFAULT_TIMEZONE,
   apiKey: "lmstudio",
   model: "qwen/qwen3.5-9b",
   contextLength: 16384,

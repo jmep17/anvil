@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import type { ModelMessage } from "ai";
 import { compactMessages, estimateTokens } from "../agent/compact.ts";
+import { describeNow } from "../agent/datetime.ts";
 import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
 import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
@@ -201,6 +202,7 @@ export async function runRepl(opts: {
             console.log(
               `context ${estimateTokens(messages)} of ${opts.config.contextLength} estimated tokens`,
             );
+            console.log(`time ${describeNow(new Date(), opts.config.timezone)}`);
             console.log(`session ${opts.session.id} · cwd ${opts.cwd}`);
             continue;
           case "mode":

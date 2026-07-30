@@ -1,3 +1,4 @@
+import { isValidTimeZone } from "../agent/datetime.ts";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DEFAULT_CONFIG, type AnvilConfig } from "./types.ts";
@@ -125,6 +126,10 @@ export function coerceConfigValue(keyPath: string[], raw: string): unknown {
 
   if (leaf === "theme" && raw !== "auto" && raw !== "dark" && raw !== "light") {
     throw new Error("ui.theme must be auto, dark or light");
+  }
+
+  if (leaf === "timezone" && raw !== "auto" && !isValidTimeZone(raw)) {
+    throw new Error(`timezone must be "auto" or an IANA zone such as Europe/London (got ${raw})`);
   }
 
   return raw;

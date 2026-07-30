@@ -1,4 +1,5 @@
 import { TextAttributes } from "@opentui/core";
+import { summarizeDiff } from "../fs/diff.ts";
 import { DiffView, diffHeight } from "./DiffView.tsx";
 import { wrapDisplayLines } from "./format.ts";
 import { colors } from "./theme.ts";
@@ -18,6 +19,8 @@ export interface PendingPermission {
 }
 
 const MAX_PREVIEW_ROWS = 16;
+/** Fewer rows than this and a diff conveys nothing; show a summary instead. */
+const MIN_PREVIEW_ROWS = 4;
 
 function softWrap(line: string, width: number): string[] {
   const text = line.replace(/\t/g, "  ");
@@ -61,14 +64,55 @@ function permissionOptions(toolName: string): string[] {
   ];
 }
 
-export function permissionContentRows(pending: PendingPermission, columns: number): number {
+export interface PermissionLayout {
+  /** Rows the diff may occupy; 0 when it must collapse to a summary. */
+  previewRows: number;
+  /** True when the diff was cut and needs its "… N more lines" row. */
+  truncated: boolean;
+  /** Total content rows, excluding the box border. */
+  contentRows: number;
+}
+
+/**
+ * Fit the prompt to the space available. The question and its options are the
+ * only actionable part, so they are budgeted first and the diff takes what is
+ * left — a long file used to push the options off the bottom of the screen.
+ */
+export function permissionLayout(
+  pending: PendingPermission,
+  columns: number,
+  maxRows: number,
+): PermissionLayout {
   const width = Math.max(12, columns - 4);
-  const preview = pending.preview
-    ? diffHeight(pending.preview, MAX_PREVIEW_ROWS) + 1
-    : 0;
-  const detail = wrapDisplayLines(pending.detail, width).length;
-  // title + detail + preview + blank + question + three options
-  return 1 + detail + preview + 1 + 1 + permissionOptions(pending.toolName).length;
+  const detailRows = wrapDisplayLines(pending.detail, width).length;
+  const optionRows = permissionOptions(pending.toolName).length;
+  // title + detail + question + options, plus the box border.
+  const fixed = 1 + detailRows + 1 + optionRows;
+  const budget = Math.max(0, maxRows - 2 - fixed);
+
+  if (!pending.preview) return { previewRows: 0, truncated: false, contentRows: fixed };
+
+  const wanted = Math.min(diffHeight(pending.preview, MAX_PREVIEW_ROWS), MAX_PREVIEW_ROWS);
+  const total = pending.preview.split("\n").length;
+
+  // Below a few rows a diff says nothing useful; a one-line summary does.
+  if (budget < MIN_PREVIEW_ROWS) {
+    return { previewRows: 0, truncated: false, contentRows: fixed + 1 };
+  }
+  if (wanted <= budget && wanted >= total) {
+    return { previewRows: wanted, truncated: false, contentRows: fixed + wanted };
+  }
+  // Cut, so reserve the row that says how much was left out.
+  const previewRows = Math.max(MIN_PREVIEW_ROWS - 1, Math.min(wanted, budget) - 1);
+  return { previewRows, truncated: true, contentRows: fixed + previewRows + 1 };
+}
+
+export function permissionContentRows(
+  pending: PendingPermission,
+  columns: number,
+  maxRows: number,
+): number {
+  return permissionLayout(pending, columns, maxRows).contentRows;
 }
 
 export function planReviewContentRows(
@@ -119,6 +163,7 @@ export function InputBox({
   editorMode,
   pasteHint,
   columns,
+  maxRows = 24,
 }: {
   value: string;
   cursor: number;
@@ -131,9 +176,15 @@ export function InputBox({
   editorMode?: "emacs" | "vim";
   pasteHint?: string | null;
   columns: number;
+  /** Rows the prompt may occupy before it would push its options off screen. */
+  maxRows?: number;
 }) {
   if (pending) {
     const width = Math.max(12, columns - 4);
+    const { previewRows, truncated } = permissionLayout(pending, columns, maxRows);
+    const totalDiffRows = pending.preview ? pending.preview.split("\n").length : 0;
+    const hidden = truncated ? Math.max(0, totalDiffRows - previewRows) : 0;
+
     return (
       <box
         border
@@ -149,8 +200,15 @@ export function InputBox({
           </text>
           <text fg={colors.muted}>{`  ${pending.detail}`}</text>
         </box>
-        {pending.preview ? (
-          <DiffView diff={pending.preview} path={pending.detail} maxHeight={MAX_PREVIEW_ROWS} />
+        {pending.preview && previewRows > 0 ? (
+          <DiffView diff={pending.preview} path={pending.detail} maxHeight={previewRows} />
+        ) : null}
+        {pending.preview && previewRows === 0 ? (
+          // Too little room for a diff, so state the shape of the change.
+          <text fg={colors.muted}>{`  ${summarizeDiff(pending.preview)}`}</text>
+        ) : null}
+        {hidden > 0 ? (
+          <text fg={colors.faint}>{`  … ${hidden} more diff line${hidden === 1 ? "" : "s"}`}</text>
         ) : null}
         <text fg={colors.text}>{wrapDisplayLines(permissionQuestion(pending.toolName), width)[0]}</text>
         <OptionList

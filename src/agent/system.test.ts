@@ -27,6 +27,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "build",
+      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "Project instructions (ANVIL.md):\nUse Bun.",
       detectedStack: ["next", "shadcn"],
@@ -47,6 +48,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "plan",
+      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],
@@ -64,6 +66,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "plan",
+      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],
@@ -86,6 +89,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       cwd: "/tmp/app",
       mode: "build",
+      now: "Thursday, 30 July 2026 at 17:42 (BST, UTC+01:00) · 2026-07-30 · Europe/London",
       skills: sampleSkills,
       repoContext: "",
       detectedStack: [],

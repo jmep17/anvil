@@ -59,6 +59,14 @@ Esc (or Ctrl+C) interrupts a running turn in the TUI, killing any command it spa
 The interactive TUI uses the terminal alternate screen (fullscreen) and inherits your
 terminal's background rather than painting its own.
 
+### Date and time
+
+The model has no clock, and its training cutoff is not "now". Every turn's system
+prompt carries the current date and time, so anything time-relative ("today",
+"how old is this release") is grounded rather than guessed. It defaults to UK time
+and follows GMT/BST automatically; set `timezone` to any IANA zone, or to `auto`
+to follow the host. `/status` shows what it currently thinks the time is.
+
 ### Colours
 
 Anvil does not assume a dark terminal. At startup it asks the terminal for its actual
@@ -127,6 +135,7 @@ anvil config set model qwen/qwen3.6-27b
 anvil config set ui.editorMode vim
 anvil config set ui.editor nvim
 anvil config set ui.theme auto        # auto | dark | light
+anvil config set timezone Europe/London   # IANA zone, or "auto" for the host
 anvil config set contextLength 65536
 anvil config unset model --project    # stop a repo from overriding global
 anvil config edit                     # open global config in $EDITOR
@@ -139,6 +148,7 @@ Example `~/.anvil/config.json`:
 ```json
 {
   "baseURL": "http://localhost:1234/v1",
+  "timezone": "Europe/London",
   "model": "qwen/qwen3.6-27b",
   "contextLength": 65536,
   "maxSteps": 40,

@@ -18,6 +18,7 @@ import {
 import { createPlanHarnessTools } from "../tools/plan.ts";
 import type { PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
+import { describeNow } from "./datetime.ts";
 import { nextStepInstructions } from "./discipline.ts";
 import { createModel } from "./model.ts";
 import {
@@ -197,6 +198,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const system = buildSystemPrompt({
     cwd: opts.cwd,
     mode: opts.config.mode,
+    // Rebuilt per turn, so a long session does not drift out of date.
+    now: describeNow(new Date(), opts.config.timezone),
     skills,
     repoContext: repo.combined,
     detectedStack,

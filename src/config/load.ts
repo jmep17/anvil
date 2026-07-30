@@ -90,6 +90,9 @@ function mergePartial(base: AnvilConfig, partial: Record<string, unknown> | null
     ui: { ...base.ui },
   };
   if (typeof partial.baseURL === "string") next.baseURL = partial.baseURL;
+  if (typeof partial.timezone === "string" && partial.timezone.trim()) {
+    next.timezone = partial.timezone.trim();
+  }
   if (typeof partial.apiKey === "string") next.apiKey = partial.apiKey;
   if (typeof partial.model === "string") next.model = partial.model;
   if (typeof partial.contextLength === "number") next.contextLength = partial.contextLength;
@@ -126,6 +129,7 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
   if (process.env.ANVIL_BASE_URL) cfg.baseURL = process.env.ANVIL_BASE_URL;
   if (process.env.ANVIL_MODEL) cfg.model = process.env.ANVIL_MODEL;
   if (process.env.ANVIL_API_KEY) cfg.apiKey = process.env.ANVIL_API_KEY;
+  if (process.env.ANVIL_TIMEZONE) cfg.timezone = process.env.ANVIL_TIMEZONE;
 
   // Deep-merge nested overrides
   cfg = {
