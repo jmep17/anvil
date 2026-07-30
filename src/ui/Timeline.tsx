@@ -2,35 +2,27 @@ import React from "react";
 import { Box, Text } from "ink";
 import { ToolRow } from "./ToolRow.tsx";
 import type { TimelineItem } from "./types.ts";
-import { truncateDisplay } from "./format.ts";
+import { headDisplayLines, truncateDisplay } from "./format.ts";
 
-/** Collapse blank lines and cap height for dense assistant display. */
-function densifyAssistant(text: string, maxLines = 4, maxChars = 400): string {
-  const clipped = text.length > maxChars ? text.slice(-maxChars) : text;
-  const lines = clipped
-    .replace(/\n{2,}/g, "\n")
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .filter((l) => l.length > 0);
-  return lines.slice(-maxLines).join("\n") || clipped.trim();
-}
+const ASSISTANT_PREVIEW_LINES = 8;
 
-function estimateLines(item: TimelineItem): number {
+function estimateLines(item: TimelineItem, columns: number): number {
   if (item.kind === "tool") return 1;
   if (item.kind === "assistant") {
-    return Math.min(4, Math.max(1, densifyAssistant(item.text).split("\n").length));
+    return headDisplayLines(item.text, Math.max(20, columns - 2), ASSISTANT_PREVIEW_LINES)
+      .lines.length;
   }
   // user, thinking, status, error — always one display line
   return 1;
 }
 
-function takeFit(items: TimelineItem[], maxLines: number): TimelineItem[] {
+function takeFit(items: TimelineItem[], maxLines: number, columns: number): TimelineItem[] {
   if (maxLines <= 0 || items.length === 0) return [];
   const out: TimelineItem[] = [];
   let used = 0;
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]!;
-    const n = estimateLines(item);
+    const n = estimateLines(item, columns);
     if (out.length > 0 && used + n > maxLines) break;
     out.unshift(item);
     used += n;
@@ -38,21 +30,44 @@ function takeFit(items: TimelineItem[], maxLines: number): TimelineItem[] {
   return out;
 }
 
-function ItemView({ item }: { item: TimelineItem }) {
+function ItemView({
+  item,
+  columns,
+  maxAssistantLines,
+}: {
+  item: TimelineItem;
+  columns: number;
+  maxAssistantLines: number;
+}) {
   switch (item.kind) {
     case "user":
       return (
         <Text color="cyan">
           {"you> "}
-          {truncateDisplay(item.text.replace(/\n/g, " ↵ "), 200)}
+          {truncateDisplay(item.text.replace(/\n/g, " ↵ "), Math.max(20, columns - 7))}
         </Text>
       );
-    case "assistant":
-      return <Text>{densifyAssistant(item.text)}</Text>;
+    case "assistant": {
+      const excerpt = headDisplayLines(
+        item.text,
+        Math.max(20, columns - 2),
+        maxAssistantLines,
+      );
+      return (
+        <Box flexDirection="column">
+          {excerpt.lines.map((line, index) => (
+            <Box key={index} flexShrink={0}>
+              <Text color="magenta">{index === 0 ? "✦ " : "  "}</Text>
+              <Text>{line || " "}</Text>
+            </Box>
+          ))}
+        </Box>
+      );
+    }
     case "thinking":
       return (
         <Text dimColor italic>
-          {truncateDisplay(item.text.replace(/\n/g, " "), 160)}
+          {truncateDisplay(item.text.replace(/\n/g, " "), Math.max(20, columns - 2))}
         </Text>
       );
     case "tool":
@@ -67,22 +82,28 @@ function ItemView({ item }: { item: TimelineItem }) {
 export function Timeline({
   items,
   maxLines,
+  columns,
 }: {
   items: TimelineItem[];
   maxLines: number;
+  columns: number;
 }) {
-  const visible = takeFit(items, maxLines);
+  const visible = takeFit(items, maxLines, columns);
   return (
     <Box
       flexDirection="column"
       height={Math.max(maxLines, 1)}
       overflow="hidden"
-      justifyContent="flex-end"
+      justifyContent="flex-start"
       flexGrow={1}
     >
       {visible.map((item) => (
         <Box key={item.id} flexShrink={0}>
-          <ItemView item={item} />
+          <ItemView
+            item={item}
+            columns={columns}
+            maxAssistantLines={Math.min(ASSISTANT_PREVIEW_LINES, Math.max(1, maxLines))}
+          />
         </Box>
       ))}
     </Box>

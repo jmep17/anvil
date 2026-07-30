@@ -27,7 +27,7 @@ interface Props {
 
 export function App({ config: initialConfig, cwd, session, yes, initialPrompt }: Props) {
   const { exit, suspendTerminal } = useApp();
-  const { rows } = useWindowSize();
+  const { rows, columns } = useWindowSize();
   const [config, setConfig] = useState(initialConfig);
   const configRef = useRef(config);
   configRef.current = config;
@@ -282,7 +282,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const inputLines = Math.max(1, prompt.buffer.value.split("\n").length);
   const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
   const pasteExtra = prompt.pasteHint ? 1 : 0;
-  // Header 3 + mid margins 2 + input (borders+content) + reserved activity + footer 1
+  // Header 3 + input (borders+content) + reserved activity + footer 1.
+  // The transcript is deliberately top-aligned, like a regular coding-agent
+  // terminal, rather than floating above the prompt in the middle of the page.
   const inputContent = pendingPermission
     ? 2
     : Math.min(inputLines, 6) + vimExtra + pasteExtra;
@@ -290,19 +292,20 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const activityActive =
     busy || Boolean(thinking) || Boolean(streaming) || runningTools.length > 0;
   const activityRows = activityActive ? ACTIVITY_RESERVE : 0;
-  const chrome = 3 + 2 + inputRows + activityRows + 1;
-  const timelineLines = Math.max(4, (rows || 24) - chrome);
+  const chrome = 3 + inputRows + activityRows + 1;
+  const timelineLines = Math.max(3, (rows || 24) - chrome);
 
   return (
     <Box flexDirection="column" width="100%" height={rows || undefined}>
       <Header status={status} />
-      <Box flexGrow={1} flexDirection="column" marginY={1} overflow="hidden">
-        <Timeline items={timelineItems} maxLines={timelineLines} />
+      <Box flexGrow={1} flexDirection="column" overflow="hidden">
+        <Timeline items={timelineItems} maxLines={timelineLines} columns={columns || 80} />
         <Activity
           busy={busy}
           thinking={thinking}
           streaming={streaming}
           runningTools={runningTools}
+          columns={columns || 80}
         />
       </Box>
       {showConfig ? (

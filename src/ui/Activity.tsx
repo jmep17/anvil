@@ -3,30 +3,37 @@ import { Box, Text } from "ink";
 import { Mascot } from "./Mascot.tsx";
 import { ProgressBar } from "./ProgressBar.tsx";
 import { ToolRow } from "./ToolRow.tsx";
-import { truncateDisplay } from "./format.ts";
+import { tailDisplayLines, truncateDisplay } from "./format.ts";
 import type { TimelineItem } from "./types.ts";
 
 /** Fixed rows reserved for Activity so chrome never jumps when busy. */
-export const ACTIVITY_RESERVE = 4;
+export const ACTIVITY_RESERVE = 6;
 
 export function Activity({
   busy,
   thinking,
   streaming,
   runningTools,
+  columns,
 }: {
   busy: boolean;
   thinking: string;
   streaming: string;
   runningTools: Extract<TimelineItem, { kind: "tool" }>[];
+  columns: number;
 }) {
   const active =
     busy || Boolean(thinking) || Boolean(streaming) || runningTools.length > 0;
   if (!active) return null;
 
   const showWorking = busy && !streaming;
-  const toolBudget = Math.max(0, ACTIVITY_RESERVE - (showWorking ? 2 : 0) - (streaming ? 2 : 0));
-  const tools = runningTools.slice(0, Math.max(1, toolBudget));
+  // Keep one running tool visible while reserving the rest for a readable
+  // response. More tools are still retained in the completed transcript.
+  const tools = streaming ? runningTools.slice(0, 1) : runningTools.slice(0, 4);
+  const streamRows = Math.max(1, ACTIVITY_RESERVE - tools.length);
+  const excerpt = streaming
+    ? tailDisplayLines(streaming, Math.max(20, columns - 4), streamRows)
+    : null;
 
   return (
     <Box
@@ -53,11 +60,14 @@ export function Activity({
           </Text>
         </Box>
       ) : null}
-      {streaming ? (
-        <Box flexShrink={0} height={2} overflow="hidden">
-          <Text>{streaming.length > 160 ? streaming.slice(-160) : streaming}</Text>
-        </Box>
-      ) : null}
+      {excerpt
+        ? excerpt.lines.map((line, index) => (
+            <Box key={`stream-${index}`} flexShrink={0}>
+              <Text color="magenta">{index === 0 ? "✦ " : "  "}</Text>
+              <Text>{line || " "}</Text>
+            </Box>
+          ))
+        : null}
     </Box>
   );
 }
