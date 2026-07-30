@@ -102,7 +102,7 @@ Enter `/` to open a completion menu. The same commands work in the TUI and the R
 | Key | Action |
 |-----|--------|
 | Enter | Send message (queued if the agent is still working) |
-| `@` | Reference a project file (fuzzy picker; contents inlined on send) |
+| `@` | Reference a file (fuzzy picker over the project; `@~/…`, `@/…` or `@../…` browses outside it) |
 | `/` | Slash-command menu; Tab completes |
 | Ctrl+J / Shift+Enter | Insert newline |
 | ↑ / ↓ | Recall previous prompts (moves the cursor inside a multi-line draft) |

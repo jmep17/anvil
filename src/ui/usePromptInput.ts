@@ -23,7 +23,12 @@ import {
   wordForward,
 } from "./textBuffer.ts";
 import { editInExternalEditor } from "./openInEditor.ts";
-import { filterFiles, listProjectFiles } from "./fileIndex.ts";
+import {
+  filterFiles,
+  isExternalQuery,
+  listExternalMatches,
+  listProjectFiles,
+} from "./fileIndex.ts";
 import {
   activeMention,
   activeMentionQuery,
@@ -155,8 +160,11 @@ export function usePromptInput(opts: Options) {
     if (!mention) return;
     const next = applyMentionSelection(buf.value, mention, path);
     setBuffer(createBuffer(next.value, next.cursor));
+    // Choosing a directory is a step, not an answer: keep the picker open so
+    // the next level lists immediately.
+    const isDirectory = path.endsWith("/");
     setFilePicker(null);
-    setPickerDismissed(true);
+    setPickerDismissed(!isDirectory);
   }, []);
 
   useEffect(() => {
@@ -182,9 +190,12 @@ export function usePromptInput(opts: Options) {
     const gen = ++loadGen.current;
     void (async () => {
       try {
-        filesRef.current = await listProjectFiles(o.cwd);
+        // `@~/…`, `@/…` and `@../…` browse the filesystem directly; everything
+        // else matches against the project index.
+        const matches = isExternalQuery(mention.query)
+          ? await listExternalMatches(mention.query)
+          : filterFiles(mention.query, (filesRef.current = await listProjectFiles(o.cwd)));
         if (gen !== loadGen.current) return;
-        const matches = filterFiles(mention.query, filesRef.current);
         setFilePicker((prev) => ({
           query: mention.query,
           matches,

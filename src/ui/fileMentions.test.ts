@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clearFileIndexCache, filterFiles, listProjectFiles } from "./fileIndex.ts";
@@ -108,5 +108,55 @@ describe("listProjectFiles + expandFileMentions", () => {
     await writeFile(join(dir, "blob.bin"), Buffer.from([0, 1, 2, 3, 0]));
     const { modelText } = await expandFileMentions("x @blob.bin", dir);
     expect(modelText).toContain("binary file omitted");
+  });
+});
+
+describe("mentions outside the project", () => {
+  test("a directory selection keeps the mention open for the next level", () => {
+    const result = applyMentionSelection("look at @~/sr", { start: 8, query: "~/sr", end: 13 }, "~/src/");
+    expect(result.value).toBe("look at @~/src/");
+    // No trailing space: the user is still typing the path.
+    expect(result.cursor).toBe(result.value.length);
+  });
+
+  test("a file selection closes the mention with a space", () => {
+    const result = applyMentionSelection("look at @~/src/i", { start: 8, query: "~/src/i", end: 16 }, "~/src/index.ts");
+    expect(result.value).toBe("look at @~/src/index.ts ");
+  });
+
+  test("a tilde path is inlined from the home directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "anvil-home-"));
+    const previous = process.env.HOME;
+    try {
+      process.env.HOME = home;
+      await writeFile(join(home, "outside.txt"), "content from outside the project");
+      const cwd = await mkdtemp(join(tmpdir(), "anvil-cwd-"));
+      try {
+        const { modelText, displayText } = await expandFileMentions("check @~/outside.txt", cwd);
+        expect(modelText).toContain("content from outside the project");
+        // The transcript keeps the short form the user typed.
+        expect(displayText).toBe("check @~/outside.txt");
+      } finally {
+        await rm(cwd, { recursive: true, force: true });
+      }
+    } finally {
+      if (previous === undefined) delete process.env.HOME;
+      else process.env.HOME = previous;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an absolute path outside the project is inlined", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "anvil-outside-"));
+    const cwd = await mkdtemp(join(tmpdir(), "anvil-cwd-"));
+    try {
+      const file = join(outside, "reference.txt");
+      await writeFile(file, "referenced content");
+      const { modelText } = await expandFileMentions(`see @${file}`, cwd);
+      expect(modelText).toContain("referenced content");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

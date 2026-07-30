@@ -1,4 +1,4 @@
-import { SyntaxStyle } from "@opentui/core";
+import { SyntaxStyle, getTreeSitterClient, type TreeSitterClient } from "@opentui/core";
 import { contrastedHex, isDark, parseHex } from "./color.ts";
 
 export type ThemeMode = "dark" | "light";
@@ -100,6 +100,36 @@ export function resolveBackground(
   if (detected.background && parseHex(detected.background)) return detected.background;
   if (detected.mode) return backgroundFor(detected.mode);
   return DARK_BACKGROUND;
+}
+
+/**
+ * Markdown styling is driven by tree-sitter captures (`markup.heading`,
+ * `markup.bold`, …), so the renderable needs a parser client to produce them.
+ * Without one it emits the raw source — `## heading`, `**bold**` — instead of
+ * formatted output. The grammars ship inside @opentui/core, so this is local
+ * and does not fetch anything.
+ *
+ * Lazy: touching it pulls in the native core, which must not happen at import
+ * time in tests that never render.
+ */
+export function markdownParser(): TreeSitterClient {
+  return getTreeSitterClient();
+}
+
+/**
+ * Load the markdown grammars before the first message needs them. Highlighting
+ * is asynchronous and a block renders unstyled until its highlights arrive, so
+ * paying that cost at startup keeps the first assistant reply from appearing
+ * as raw `##` and `**`. Failure is not fatal — it only means the first block
+ * formats a moment late.
+ */
+export async function warmMarkdownParser(): Promise<void> {
+  const sample = "# h\n\n**b** `c`\n\n- i\n";
+  try {
+    await markdownParser().highlightOnce(sample, "markdown");
+  } catch {
+    // Grammar unavailable; the renderable falls back on its own.
+  }
 }
 
 /** SyntaxStyle for assistant markdown (lazy — needs native OpenTUI core). */

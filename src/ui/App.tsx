@@ -42,6 +42,7 @@ import {
   applyPalette,
   buildPalette,
   resolveBackground,
+  warmMarkdownParser,
   type ThemeMode,
 } from "./theme.ts";
 import { usePromptInput } from "./usePromptInput.ts";
@@ -904,6 +905,10 @@ export async function runTui(opts: {
       // Tune the palette before the first frame: colours are read at render
       // time, so this must land ahead of it.
       applyPalette(buildPalette(await detectBackground(renderer, opts.config.ui.theme)));
+
+      // Load the markdown grammars now rather than when the first reply lands,
+      // so prose is not briefly (or, if no repaint follows, permanently) raw.
+      await warmMarkdownParser();
 
       const root = createRoot(renderer);
       root.render(

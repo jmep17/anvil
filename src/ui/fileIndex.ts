@@ -1,9 +1,77 @@
-import { basename } from "node:path";
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { glob } from "glob";
 import { loadIgnore } from "../fs/ignore.ts";
 
 const CACHE_TTL_MS = 30_000;
 const MAX_RESULTS = 12;
+
+/** The user's home, preferring their environment over the passwd entry. */
+function defaultHome(): string {
+  return process.env.HOME || process.env.USERPROFILE || homedir();
+}
+
+/** Expand a leading `~` to the home directory. */
+export function expandHome(path: string, home = defaultHome()): string {
+  if (path === "~") return home;
+  if (path.startsWith("~/")) return join(home, path.slice(2));
+  return path;
+}
+
+/**
+ * True when a mention points outside the project — `~/…`, an absolute path, or
+ * an explicit `./` or `../`. Those are browsed directly instead of being
+ * matched against the project index.
+ */
+export function isExternalQuery(query: string): boolean {
+  return /^(~($|\/)|\/|\.\.?\/)/.test(query);
+}
+
+/**
+ * Directory listing for an external mention. Keeps the form the user typed —
+ * a `~` stays a `~` — so the inserted mention is short and portable.
+ * Directories come back with a trailing slash so browsing can continue.
+ */
+export async function listExternalMatches(
+  query: string,
+  limit = MAX_RESULTS,
+  home = defaultHome(),
+): Promise<string[]> {
+  // A trailing slash means "inside this directory"; otherwise the last segment
+  // is a partial name to filter on.
+  const endsWithSlash = query.endsWith("/");
+  const prefix = endsWithSlash ? query : query.slice(0, query.lastIndexOf("/") + 1);
+  const partial = endsWithSlash ? "" : query.slice(query.lastIndexOf("/") + 1);
+  const dir = resolve(expandHome(prefix || "/", home));
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    // Not a directory, or not readable — offer nothing rather than throwing.
+    return [];
+  }
+
+  const lower = partial.toLowerCase();
+  const out: string[] = [];
+  for (const entry of entries) {
+    // Hidden entries only surface once the user types the dot.
+    if (entry.name.startsWith(".") && !partial.startsWith(".")) continue;
+    if (lower && !entry.name.toLowerCase().startsWith(lower)) continue;
+    out.push(`${prefix}${entry.name}${entry.isDirectory() ? "/" : ""}`);
+  }
+
+  // Directories first so browsing deeper is the easy default.
+  out.sort((a, b) => {
+    const aDir = a.endsWith("/");
+    const bDir = b.endsWith("/");
+    if (aDir !== bDir) return aDir ? -1 : 1;
+    return a.localeCompare(b);
+  });
+  return out.slice(0, limit);
+}
 
 interface CacheEntry {
   files: string[];

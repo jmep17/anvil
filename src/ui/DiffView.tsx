@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { extname } from "node:path";
-import { colors } from "./theme.ts";
+import { colors, markdownParser } from "./theme.ts";
 
 /** Tree-sitter language hint from a file extension. */
 export function filetypeOf(path: string): string | undefined {
@@ -46,6 +46,7 @@ export const DiffView = memo(function DiffView({
       <diff
         diff={diff}
         view="unified"
+        treeSitterClient={markdownParser()}
         filetype={path ? filetypeOf(path) : undefined}
         showLineNumbers
         wrapMode="none"

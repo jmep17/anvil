@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 import { Timeline } from "./Timeline.tsx";
+import { warmMarkdownParser } from "./theme.ts";
 import type { TimelineItem } from "./types.ts";
+
+// Markdown renders nothing until its grammar is loaded, exactly as in the app.
+beforeAll(async () => {
+  await warmMarkdownParser();
+});
 
 async function frameFor(items: TimelineItem[], width = 72, height = 24): Promise<string> {
   const { renderer, captureCharFrame, waitForVisualIdle } = await testRender(
@@ -108,9 +114,10 @@ describe("Timeline rendering", () => {
     expect(frame).toContain("Cannot reach the model server");
   });
 
-  // Assistant and plan bodies go through OpenTUI's markdown renderable, whose
-  // tree-sitter client is unavailable under the test renderer — the body text
-  // cannot be asserted here. The surrounding chrome still can.
+  // Markdown bodies are highlighted asynchronously by tree-sitter, and whether
+  // a captured frame lands before or after those highlights arrive is a race
+  // under the test renderer — asserting on the body here is flaky. The
+  // surrounding chrome is stable and is what these cover.
   test("assistant prose carries no label or gutter of its own", async () => {
     const frame = await frameFor([{ kind: "assistant", id: "a1", text: "Here is what I found." }]);
     expect(frame).not.toContain("ANVIL");

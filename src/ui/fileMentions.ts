@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { MAX_TOOL_OUTPUT, truncate } from "../tools/types.ts";
+import { expandHome } from "./fileIndex.ts";
 
 export interface ActiveMention {
   /** Index of the `@` in value. */
@@ -82,7 +83,9 @@ export async function expandFileMentions(
   const blocks: string[] = [];
 
   for (const rel of paths) {
-    const abs = resolve(cwd, rel);
+    // `~` and absolute paths reference files outside the project; anything
+    // else stays relative to it.
+    const abs = resolve(cwd, expandHome(rel));
     try {
       const file = Bun.file(abs);
       if (!(await file.exists())) continue;
@@ -110,7 +113,9 @@ export function applyMentionSelection(
   mention: ActiveMention,
   path: string,
 ): { value: string; cursor: number } {
-  const insertion = `@${path} `;
+  // A directory is a step on the way somewhere, so leave the cursor against it
+  // rather than closing the mention with a space.
+  const insertion = path.endsWith("/") ? `@${path}` : `@${path} `;
   const next = value.slice(0, mention.start) + insertion + value.slice(mention.end);
   return { value: next, cursor: mention.start + insertion.length };
 }

@@ -11,7 +11,7 @@ import {
   summarizeToolResult,
   wrapDisplayLines,
 } from "./format.ts";
-import { colors, getMarkdownSyntaxStyle } from "./theme.ts";
+import { colors, getMarkdownSyntaxStyle, markdownParser } from "./theme.ts";
 import type { TimelineItem, ToolStatus } from "./types.ts";
 
 /**
@@ -56,11 +56,13 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   streaming?: boolean;
 }) {
   const syntaxStyle = useMemo(() => getMarkdownSyntaxStyle(), []);
+  const parser = useMemo(() => markdownParser(), []);
   return (
     <box flexDirection="column" width="100%" flexShrink={0} paddingLeft={2}>
       <markdown
         content={text}
         syntaxStyle={syntaxStyle}
+        treeSitterClient={parser}
         conceal
         streaming={Boolean(streaming)}
         width="100%"
