@@ -85,7 +85,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   const scheduleLiveRender = useCallback(() => {
     if (liveRenderTimerRef.current) return;
-    liveRenderTimerRef.current = setTimeout(publishLive, 50);
+    liveRenderTimerRef.current = setTimeout(publishLive, 80);
   }, [publishLive]);
 
   const cancelLiveRender = useCallback(() => {

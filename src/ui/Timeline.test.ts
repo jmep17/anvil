@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildTranscriptLines } from "./Timeline.tsx";
+import { buildTranscriptLines, streamDisplayLines } from "./Timeline.tsx";
 
 describe("buildTranscriptLines", () => {
   test("renders every tool input and output character in narrow terminals", () => {
@@ -79,5 +79,16 @@ describe("buildTranscriptLines", () => {
       80,
     );
     expect(lines.map((line) => line.text).join("\n")).toContain("plan for review");
+  });
+});
+
+describe("streamDisplayLines", () => {
+  test("preserves every streamed character without Markdown reformatting", () => {
+    const text = "## still typing\n`partial code`\n" + "x".repeat(70);
+    const lines = streamDisplayLines(text, 20);
+
+    expect(lines.join("\n")).toContain("## still");
+    expect(lines.join("\n")).toContain("`partial code`");
+    expect(lines.join("\n").replace(/\n/g, "")).toContain("x".repeat(70));
   });
 });

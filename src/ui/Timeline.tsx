@@ -137,6 +137,16 @@ export function buildTranscriptLines(
   return lines;
 }
 
+/**
+ * Keep the streaming surface deliberately plain. Incremental Markdown parsing
+ * can restyle earlier rows as an unfinished construct becomes valid, which is
+ * highly visible in a terminal renderer. Completed messages still use the
+ * full Markdown treatment below.
+ */
+export function streamDisplayLines(text: string, columns: number): string[] {
+  return wrapDisplayLines(text, Math.max(12, columns - 6));
+}
+
 const PlainBlock = memo(function PlainBlock({
   title,
   body,
@@ -294,6 +304,35 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   );
 });
 
+const LiveAssistantText = memo(function LiveAssistantText({
+  text,
+  columns,
+}: {
+  text: string;
+  columns: number;
+}) {
+  const lines = useMemo(() => streamDisplayLines(text, columns), [columns, text]);
+  return (
+    <box
+      flexDirection="column"
+      width="100%"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={colors.purple}
+      paddingLeft={1}
+    >
+      <text fg={colors.purple} attributes={TextAttributes.BOLD}>
+        ✦ ANVIL
+      </text>
+      {lines.map((line, index) => (
+        <text key={index} fg={colors.text}>
+          {`  ${line || " "}`}
+        </text>
+      ))}
+    </box>
+  );
+});
+
 const TimelineItemView = memo(function TimelineItemView({
   item,
   width,
@@ -383,7 +422,7 @@ export const Timeline = memo(function Timeline({
         />
       ) : null}
       {streaming ? (
-        <AssistantMarkdown key="live-response" text={streaming} streaming />
+        <LiveAssistantText key="live-response" text={streaming} columns={columns} />
       ) : null}
     </scrollbox>
   );
