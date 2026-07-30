@@ -27,3 +27,27 @@ describe("loadConfig skills/context", () => {
     }
   });
 });
+
+describe("loadConfig precedence", () => {
+  test("a CLI override beats ANVIL_MODEL, which beats project settings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anvil-cfg-"));
+    const previous = process.env.ANVIL_MODEL;
+    try {
+      await mkdir(join(root, ".anvil"), { recursive: true });
+      await writeFile(
+        join(root, ".anvil", "settings.json"),
+        JSON.stringify({ model: "from-project" }),
+      );
+
+      expect((await loadConfig(root)).model).toBe("from-project");
+
+      process.env.ANVIL_MODEL = "from-env";
+      expect((await loadConfig(root)).model).toBe("from-env");
+      expect((await loadConfig(root, { model: "from-cli" })).model).toBe("from-cli");
+    } finally {
+      if (previous === undefined) delete process.env.ANVIL_MODEL;
+      else process.env.ANVIL_MODEL = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

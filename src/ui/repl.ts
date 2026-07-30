@@ -68,6 +68,9 @@ export async function runRepl(opts: {
 
   let messages: ModelMessage[] = await opts.session.loadMessages();
   const ask = opts.yes ? allowAll : askPermissionCli;
+  // Owned here so an "allow this action for the session" grant survives past
+  // the single turn that produced it.
+  const alwaysAllowed = new Set<string>();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   const reviewPlan = async (plan: ReviewedPlan): Promise<void> => {
@@ -104,7 +107,6 @@ export async function runRepl(opts: {
   };
 
   const runTurn = async (userText: string) => {
-    const before = messages.length;
     const { modelText } = await expandFileMentions(userText, opts.cwd);
     const userMsg: ModelMessage = { role: "user", content: modelText };
     messages = [...messages, userMsg];
@@ -125,14 +127,14 @@ export async function runRepl(opts: {
         cwd: opts.cwd,
         messages,
         askPermission: ask,
+        alwaysAllowed,
         abortSignal: controller.signal,
         onEvent: (event) => {
           if (event.type === "text" && event.text.trim()) streamed = true;
           printEvent(event);
         },
       });
-      const added = result.messages.slice(before + 1);
-      for (const m of added) await opts.session.appendMessage(m);
+      for (const m of result.responseMessages) await opts.session.appendMessage(m);
       messages = result.messages;
       reviewedPlan = result.plan;
       if (opts.config.mode === "plan" && result.plan) {

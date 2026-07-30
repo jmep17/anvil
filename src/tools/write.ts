@@ -2,16 +2,17 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { tool } from "ai";
 import { z } from "zod";
+import { unifiedDiff } from "../fs/diff.ts";
 import {
   requirePermission,
   resolveProjectMutationPath,
   type ToolContext,
 } from "./types.ts";
 
-function contentPreview(content: string): string {
-  const text = content.replace(/\r/g, "");
-  const excerpt = text.length > 240 ? `${text.slice(0, 239)}…` : text;
-  return `New content (${content.length} bytes): ${excerpt.replace(/\n/g, " ↵ ")}`;
+async function contentPreview(abs: string, content: string): Promise<string> {
+  const file = Bun.file(abs);
+  const before = (await file.exists()) ? await file.text() : "";
+  return unifiedDiff(abs, before, content);
 }
 
 export function createWriteTool(ctx: ToolContext) {
@@ -32,8 +33,8 @@ export function createWriteTool(ctx: ToolContext) {
         ctx,
         "Write",
         abs,
-        contentPreview(content),
-        `${abs}\0${content}`,
+        await contentPreview(abs, content),
+        abs,
       );
       if (!ok) return "Error: permission denied for Write";
       await mkdir(dirname(abs), { recursive: true });

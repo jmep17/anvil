@@ -40,10 +40,20 @@ export interface RunAgentOptions {
   toolAllowlist?: string[];
   mcpTools?: ToolSet;
   depth?: number;
+  /**
+   * Approvals the user granted with "always" earlier in this session. Owned by
+   * the caller so a grant outlives the single turn that produced it.
+   */
+  alwaysAllowed?: Set<string>;
 }
 
 export interface RunAgentResult {
   messages: ModelMessage[];
+  /**
+   * Only the messages this turn produced. Callers must persist these rather
+   * than slicing `messages`, whose head may have been compacted away.
+   */
+  responseMessages: ModelMessage[];
   text: string;
   mcpHandles: McpHandle[];
   plan?: ReviewedPlan;
@@ -108,7 +118,7 @@ async function resolveInjectedSkills(
 export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   const depth = opts.depth ?? 0;
   const planHarness = opts.config.mode === "plan" && depth === 0 ? new PlanHarness() : undefined;
-  const alwaysAllowed = new Set<string>();
+  const alwaysAllowed = opts.alwaysAllowed ?? new Set<string>();
   const todos: TodoItem[] = [];
   const skills = await listSkills(opts.cwd);
   const repo = await loadRepoContext(opts.cwd, opts.config.context);
@@ -166,6 +176,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         mcpTools,
         toolAllowlist: toolNames,
         depth: depth + 1,
+        alwaysAllowed,
       });
       return sub.text || "(subagent finished with no text)";
     },
@@ -197,9 +208,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   });
 
   let step = 0;
+  let streamedText = false;
   const result = streamText({
     model,
-    system,
+    instructions: system,
     messages,
     tools,
     abortSignal: opts.abortSignal,
@@ -207,6 +219,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       ? [isStepCount(opts.config.maxSteps), () => planHarness.isComplete]
       : isStepCount(opts.config.maxSteps),
     maxRetries: 2,
+    // `instructions` overrides carry forward to later steps (see the AI SDK's
+    // PrepareStepResult docs), so every branch must state the instructions it
+    // wants in full. Returning undefined would leave the previous step's
+    // override — a stale plan stage or discipline checkpoint — welded on.
     prepareStep: ({ steps }) => {
       const planControl = planHarness?.nextStep();
       if (planControl) {
@@ -217,11 +233,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         };
       }
       const pauseRead = shouldPauseReadTool(steps);
-      const instructions = nextStepInstructions(
-        system,
-        Boolean(steps.at(-1)?.toolCalls.length),
-      );
-      if (!pauseRead && !instructions) return undefined;
+      const instructions =
+        nextStepInstructions(system, Boolean(steps.at(-1)?.toolCalls.length)) ?? system;
 
       if (pauseRead) {
         opts.onEvent?.({
@@ -230,7 +243,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         });
       }
       return {
-        ...(instructions ? { instructions } : {}),
+        instructions,
         ...(pauseRead ? { activeTools: Object.keys(tools).filter((name) => name !== "Read") } : {}),
       };
     },
@@ -241,10 +254,11 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       });
     },
     onChunk: ({ chunk }) => {
-      // Reasoning is intentionally surfaced. User-facing prose is held until
-      // step completion so tentative pre-tool chatter cannot pollute the transcript.
       if (chunk.type === "reasoning-delta") {
         opts.onEvent?.({ type: "thinking", text: chunk.text });
+      } else if (chunk.type === "text-delta") {
+        streamedText = true;
+        opts.onEvent?.({ type: "text", text: chunk.text });
       }
     },
     onToolExecutionStart: ({ toolCall }) => {
@@ -288,9 +302,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     },
     onStepFinish: async ({ text, toolCalls }) => {
       step += 1;
-      if (!planHarness && toolCalls.length === 0 && text) {
+      // Fallback for providers that return a step's prose in one piece rather
+      // than as deltas; without it the response would never reach the UI.
+      if (!planHarness && !streamedText && toolCalls.length === 0 && text) {
         opts.onEvent?.({ type: "text", text });
       }
+      streamedText = false;
       opts.onEvent?.({ type: "step", step });
     },
   });
@@ -311,6 +328,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
 
   return {
     messages: nextMessages,
+    responseMessages,
     text: finalText,
     mcpHandles,
     plan: planHarness?.reviewedPlan,

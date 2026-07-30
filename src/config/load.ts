@@ -120,6 +120,12 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
   );
   cfg = mergePartial(cfg, projectCfg);
 
+  // Environment before the caller's overrides: `overrides` carries the CLI
+  // flags, and the documented precedence is default → global → project → env → CLI.
+  if (process.env.ANVIL_BASE_URL) cfg.baseURL = process.env.ANVIL_BASE_URL;
+  if (process.env.ANVIL_MODEL) cfg.model = process.env.ANVIL_MODEL;
+  if (process.env.ANVIL_API_KEY) cfg.apiKey = process.env.ANVIL_API_KEY;
+
   // Deep-merge nested overrides
   cfg = {
     ...cfg,
@@ -132,10 +138,6 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
       : cfg.context,
     ui: overrides.ui ? mergeUi(cfg.ui, overrides.ui) : cfg.ui,
   };
-
-  if (process.env.ANVIL_BASE_URL) cfg.baseURL = process.env.ANVIL_BASE_URL;
-  if (process.env.ANVIL_MODEL) cfg.model = process.env.ANVIL_MODEL;
-  if (process.env.ANVIL_API_KEY) cfg.apiKey = process.env.ANVIL_API_KEY;
 
   return cfg;
 }

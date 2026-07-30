@@ -21,7 +21,16 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-export function createWebFetchTool(_ctx: ToolContext) {
+/**
+ * A request-scoped signal that fires on either the turn's abort or the timeout,
+ * so Esc cancels an in-flight fetch instead of leaving it to run out the clock.
+ */
+function requestSignal(ctx: ToolContext, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  return ctx.abortSignal ? AbortSignal.any([ctx.abortSignal, timeout]) : timeout;
+}
+
+export function createWebFetchTool(ctx: ToolContext) {
   return tool({
     description:
       "Fetch a URL and return readable text content (HTML stripped). Use for documentation and error pages.",
@@ -35,7 +44,7 @@ export function createWebFetchTool(_ctx: ToolContext) {
             "User-Agent": "Anvil/0.1 (+local coding agent)",
             Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
           },
-          signal: AbortSignal.timeout(30_000),
+          signal: requestSignal(ctx, 30_000),
         });
         if (!res.ok) return `Error: HTTP ${res.status} fetching ${url}`;
         const ctype = res.headers.get("content-type") ?? "";
@@ -54,7 +63,7 @@ export function createWebFetchTool(_ctx: ToolContext) {
   });
 }
 
-export function createWebSearchTool(_ctx: ToolContext) {
+export function createWebSearchTool(ctx: ToolContext) {
   return tool({
     description:
       "Search the web via DuckDuckGo HTML results. Returns titles, URLs, and snippets for research and docs lookup.",
@@ -70,7 +79,7 @@ export function createWebSearchTool(_ctx: ToolContext) {
           headers: {
             "User-Agent": "Anvil/0.1 (+local coding agent)",
           },
-          signal: AbortSignal.timeout(30_000),
+          signal: requestSignal(ctx, 30_000),
         });
         if (!res.ok) return `Error: HTTP ${res.status} from DuckDuckGo`;
         const html = await res.text();

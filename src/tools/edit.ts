@@ -1,15 +1,31 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { unifiedDiff } from "../fs/diff.ts";
 import {
   requirePermission,
   resolveProjectMutationPath,
   type ToolContext,
 } from "./types.ts";
 
-function editPreview(oldString: string, newString: string): string {
-  const compact = (value: string) =>
-    (value.length > 120 ? `${value.slice(0, 119)}…` : value).replace(/\n/g, " ↵ ");
-  return `- ${compact(oldString)}\n+ ${compact(newString)}`;
+/**
+ * `String.prototype.replace` expands `$&`, `` $` ``, `$'` and `$1` inside the
+ * replacement, which silently corrupts edits to regex, shell and template code.
+ * Splitting and joining treats the replacement as a literal.
+ */
+export function applyEdit(
+  text: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+): string {
+  if (replaceAll) return text.split(oldString).join(newString);
+  const at = text.indexOf(oldString);
+  if (at === -1) return text;
+  return text.slice(0, at) + newString + text.slice(at + oldString.length);
+}
+
+function editPreview(path: string, before: string, after: string): string {
+  return unifiedDiff(path, before, after);
 }
 
 export function createEditTool(ctx: ToolContext) {
@@ -28,14 +44,8 @@ export function createEditTool(ctx: ToolContext) {
       }
       const abs = await resolveProjectMutationPath(ctx.cwd, path);
       if (!abs) return `Error: Edit target must remain inside the project: ${path}`;
-      const ok = await requirePermission(
-        ctx,
-        "Edit",
-        abs,
-        editPreview(old_string, new_string),
-        `${abs}\0${old_string}\0${new_string}\0${Boolean(replace_all)}`,
-      );
-      if (!ok) return "Error: permission denied for Edit";
+      // Validate before prompting so the user is never asked to approve an edit
+      // that cannot succeed.
       const file = Bun.file(abs);
       if (!(await file.exists())) return `Error: file not found: ${abs}`;
       const text = await file.text();
@@ -46,9 +56,15 @@ export function createEditTool(ctx: ToolContext) {
       if (!replace_all && count > 1) {
         return `Error: old_string matched ${count} times; provide a more specific string or set replace_all=true`;
       }
-      const next = replace_all
-        ? text.split(old_string).join(new_string)
-        : text.replace(old_string, new_string);
+      const next = applyEdit(text, old_string, new_string, Boolean(replace_all));
+      const ok = await requirePermission(
+        ctx,
+        "Edit",
+        abs,
+        editPreview(abs, text, next),
+        abs,
+      );
+      if (!ok) return "Error: permission denied for Edit";
       await Bun.write(abs, next);
       return `Edited ${abs} (${replace_all ? count : 1} replacement(s))`;
     },

@@ -67,6 +67,8 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     phase: "ready" | "denying";
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Session-scoped: a grant made with [A] must outlive the turn it came from.
+  const alwaysAllowedRef = useRef(new Set<string>());
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
   const messagesRef = useRef<ModelMessage[]>([]);
@@ -292,7 +294,6 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         text: revisingPlan ? `Plan feedback: ${displayText}` : displayText,
       });
       const userMsg: ModelMessage = { role: "user", content: request };
-      const before = messagesRef.current.length;
       const nextMessages = [...messagesRef.current, userMsg];
       messagesRef.current = nextMessages;
       await session.appendMessage(userMsg);
@@ -345,11 +346,13 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           cwd,
           messages: nextMessages,
           askPermission,
+          alwaysAllowed: alwaysAllowedRef.current,
           abortSignal: controller.signal,
           onEvent,
         });
-        const added = result.messages.slice(before + 1);
-        for (const m of added) await session.appendMessage(m);
+        // Persist what this turn produced. Slicing `result.messages` by an index
+        // into the pre-call array breaks as soon as compaction shortens the head.
+        for (const m of result.responseMessages) await session.appendMessage(m);
         messagesRef.current = result.messages;
         const isPlanMode = configRef.current.mode === "plan";
         flushLive("assistant", !isPlanMode);
@@ -580,15 +583,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           />
         </>
       )}
-      <Footer
-        busy={busy}
-        editorMode={config.ui.editorMode}
-        vimMode={prompt.vimMode}
-        showConfig={showConfig}
-        browsingHistory={browsingHistory}
-        filePicker={Boolean(prompt.filePicker)}
-        columns={columns || 80}
-      />
+      {/* Spread the same state used to reserve the footer's height, so what is
+          drawn and what was measured cannot drift apart. */}
+      <Footer {...footerState} columns={columns || 80} />
     </box>
   );
 }
