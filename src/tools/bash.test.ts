@@ -1,5 +1,52 @@
 import { describe, expect, test } from "bun:test";
+import type { SkillInfo } from "../skills/types.ts";
 import { approvalScope } from "./bash.ts";
+import { createBuiltinTools } from "./index.ts";
+import type { ToolContext } from "./types.ts";
+
+const execOpts = {
+  toolCallId: "1",
+  messages: [] as never[],
+  abortSignal: new AbortController().signal,
+  context: {},
+};
+
+function ctxWith(signal?: AbortSignal): ToolContext {
+  return {
+    cwd: "/tmp",
+    mode: "build",
+    alwaysAllowed: new Set<string>(),
+    askPermission: async () => "allow",
+    abortSignal: signal,
+    todos: [],
+    runSubagent: async () => "ok",
+    getSkillContent: async () => null,
+    listSkills: async () => [] as SkillInfo[],
+  };
+}
+
+describe("Bash tool", () => {
+  test("an interrupted turn kills the command instead of orphaning it", async () => {
+    const controller = new AbortController();
+    const tools = createBuiltinTools(ctxWith(controller.signal));
+    setTimeout(() => controller.abort(), 300);
+
+    const started = Date.now();
+    const out = String(await tools.Bash!.execute!({ command: "sleep 30" }, execOpts));
+
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(out).toContain("interrupted by the user");
+  });
+
+  test("a timeout says so rather than reporting a bare exit code", async () => {
+    const tools = createBuiltinTools(ctxWith());
+    const out = String(
+      await tools.Bash!.execute!({ command: "sleep 30", timeout_ms: 300 }, execOpts),
+    );
+    expect(out).toContain("timed out after 300ms");
+    expect(out).toContain("exit_code:");
+  });
+});
 
 describe("approvalScope", () => {
   test("a plain command is scoped to its program", () => {
