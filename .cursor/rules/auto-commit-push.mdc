@@ -1,0 +1,14 @@
+---
+description: Always commit and push completed work to the current branch without waiting to be asked
+alwaysApply: true
+---
+
+# Auto commit and push
+
+When you finish implementing requested work (features, fixes, refactors, migrations):
+
+1. Create a git commit for the relevant changes (follow the repo's commit-message style; use a HEREDOC).
+2. Push to the tracked remote branch (`git push -u origin HEAD` if needed).
+3. Do this without waiting for an explicit "commit" / "push" request.
+
+Still apply normal git safety: never force-push main/master, never amend pushed commits unless explicitly asked, never skip hooks, never commit secrets, and never update git config.
