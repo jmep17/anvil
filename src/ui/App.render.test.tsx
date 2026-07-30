@@ -130,13 +130,16 @@ describe("App", () => {
 
   test("an unreachable model server is reported in the transcript and the footer", async () => {
     const session = await SessionStore.create(cwd);
-    const { renderer, externalOutput, waitForFrame, waitForVisualIdle } = await testRender(
+    const setup = await testRender(
       <App config={config()} cwd={cwd} session={session} />,
       SPLIT,
     );
+    const { renderer, externalOutput, waitForVisualIdle } = setup;
     try {
-      // The footer reports the connection state...
-      const frame = await waitForFrame((f) => f.includes("offline"), { maxPasses: 400 });
+      // The footer reports the connection state. Polled against the clock: the
+      // probe is waiting on a TCP connection to fail, which no number of render
+      // passes brings any closer.
+      const frame = await pollFrame(setup, (f) => f.includes("offline"));
       expect(frame).toContain("offline");
 
       // ...and the failure itself is written to the transcript.
