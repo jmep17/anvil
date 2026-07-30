@@ -123,6 +123,101 @@ describe("Timeline rendering", () => {
     expect(frame).toContain("⏺ Plan for review");
   });
 
+  test("no scrollbar is drawn even when the content overflows", async () => {
+    const many: TimelineItem[] = Array.from({ length: 40 }, (_, i) => ({
+      kind: "user" as const,
+      id: `u${i}`,
+      text: `message number ${i}`,
+    }));
+    const frame = await frameFor(many, 72, 12);
+
+    // The scrollbar track and thumb glyphs OpenTUI would otherwise draw.
+    for (const glyph of ["█", "▓", "▒", "░", "▐", "▌"]) {
+      expect(frame).not.toContain(glyph);
+    }
+  });
+
+  test("a status line hugs what it annotates, turns and tools breathe", async () => {
+    const frame = await frameFor([
+      { kind: "user", id: "u1", text: "do the thing" },
+      { kind: "status", id: "s1", text: "model=qwen mode=plan" },
+      {
+        kind: "tool",
+        id: "t1",
+        name: "Grep",
+        input: { pattern: "x" },
+        status: "done",
+        output: "a\nb",
+      },
+    ]);
+    const lines = frame.split("\n").map((line) => line.trimEnd());
+    const at = (needle: string) => lines.findIndex((line) => line.includes(needle));
+
+    // Status sits directly under the turn it describes...
+    expect(at("· model=qwen")).toBe(at("> do the thing") + 1);
+    // ...and the tool block gets a blank line of its own.
+    expect(lines[at("⏺ Grep") - 1]).toBe("");
+  });
+
+  test("a fast tool is not stamped with a duration", async () => {
+    const frame = await frameFor([
+      {
+        kind: "tool",
+        id: "t1",
+        name: "Read",
+        input: { path: "a.ts" },
+        status: "done",
+        output: "x",
+        ms: 40,
+      },
+    ]);
+    expect(frame).not.toContain("40ms");
+    expect(frame).toContain("⏺ Read(a.ts)");
+  });
+
+  test("a slow tool still reports how long it took", async () => {
+    const frame = await frameFor([
+      {
+        kind: "tool",
+        id: "t1",
+        name: "Bash",
+        input: { command: "bun test" },
+        status: "done",
+        output: "x",
+        ms: 4200,
+      },
+    ]);
+    expect(frame).toContain("4.2s");
+  });
+
+  test("the expand hint appears once, on the newest row", async () => {
+    const two: TimelineItem[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        name: "Read",
+        input: { path: "a.ts" },
+        status: "done",
+        output: "x",
+      },
+      {
+        kind: "tool",
+        id: "t2",
+        name: "Read",
+        input: { path: "b.ts" },
+        status: "done",
+        output: "y",
+      },
+    ];
+    const frame = await frameFor(two);
+    const lines = frame.split("\n");
+    const hintRows = lines.flatMap((line, i) => (line.includes("ctrl+o") ? [i] : []));
+
+    expect(hintRows).toHaveLength(1);
+    // It hangs off the newest call's result row, not the older one's.
+    expect(hintRows[0]).toBeGreaterThan(lines.findIndex((l) => l.includes("b.ts")));
+  });
+
   test("thinking is labelled and indented", async () => {
     const frame = await frameFor([{ kind: "thinking", id: "th1", text: "weighing options" }]);
     expect(frame).toContain("✻ Thinking…");

@@ -4,6 +4,7 @@ import {
   formatToolInput,
   summarizeToolInput,
   summarizeToolResult,
+  SLOW_TOOL_MS,
   wrapDisplayLines,
 } from "./format.ts";
 
@@ -82,10 +83,21 @@ describe("summarizeToolInput", () => {
 });
 
 describe("formatToolDuration", () => {
-  test("formats missing, millisecond, and second durations", () => {
-    expect(formatToolDuration()).toBe("");
-    expect(formatToolDuration(42)).toBe("42ms");
+  test("shows a duration only once it was long enough to feel", () => {
     expect(formatToolDuration(1500)).toBe("1.5s");
+    expect(formatToolDuration(12_000)).toBe("12.0s");
+  });
+
+  test("stays blank for anything quick, so rows are not stamped with noise", () => {
+    expect(formatToolDuration()).toBe("");
+    expect(formatToolDuration(42)).toBe("");
+    expect(formatToolDuration(999)).toBe("");
+    expect(formatToolDuration(SLOW_TOOL_MS - 1)).toBe("");
+  });
+
+  test("ignores a nonsense value rather than printing NaN", () => {
+    expect(formatToolDuration(Number.NaN)).toBe("");
+    expect(formatToolDuration(Number.POSITIVE_INFINITY)).toBe("");
   });
 });
 

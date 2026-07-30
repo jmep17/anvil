@@ -69,6 +69,34 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   );
 });
 
+/**
+ * Streamed text is rendered plain, not through the Markdown parser.
+ * Incremental parsing restyles and reflows earlier rows every time an
+ * unfinished construct becomes valid, which reads as flicker in a terminal.
+ * The finished message is re-rendered as Markdown once the turn completes.
+ */
+const LiveAssistantText = memo(function LiveAssistantText({
+  text,
+  width,
+}: {
+  text: string;
+  width: number;
+}) {
+  const lines = useMemo(
+    () => wrapDisplayLines(text, Math.max(12, width - 2)),
+    [text, width],
+  );
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0} paddingLeft={2}>
+      {lines.map((line, index) => (
+        <text key={index} fg={colors.text}>
+          {line || " "}
+        </text>
+      ))}
+    </box>
+  );
+});
+
 /** A labelled markdown block — used where the content needs a heading (plans). */
 const LabelledMarkdown = memo(function LabelledMarkdown({
   label,
@@ -147,10 +175,12 @@ const ToolRow = memo(function ToolRow({
   item,
   width,
   expandAll,
+  isLast,
 }: {
   item: Extract<TimelineItem, { kind: "tool" }>;
   width: number;
   expandAll: boolean;
+  isLast?: boolean;
 }) {
   const [expandedSelf, setExpandedSelf] = useState(false);
   const expanded = expandAll || expandedSelf;
@@ -178,15 +208,17 @@ const ToolRow = memo(function ToolRow({
         <text fg={colors.text} attributes={TextAttributes.BOLD}>
           {title}
         </text>
-        {duration ? (
-          <text fg={colors.faint}>{`  ${duration}`}</text>
-        ) : null}
+        {duration ? <text fg={colors.faint}>{`  ${duration}`}</text> : null}
       </box>
 
       {!expanded ? (
-        <text fg={colors.muted}>
-          {`  ${CORNER}  ${summary}${item.output ? "  (ctrl+o to expand)" : ""}`}
-        </text>
+        <box flexDirection="row" width="100%" flexShrink={0}>
+          <text fg={colors.muted}>{`  ${CORNER}  ${summary}`}</text>
+          {/* Only the newest row carries the hint — on every row it is noise. */}
+          {isLast && item.output ? (
+            <text fg={colors.faint}>{"  ctrl+o to expand"}</text>
+          ) : null}
+        </box>
       ) : (
         <>
           <text fg={colors.muted}>
@@ -243,14 +275,32 @@ const StatusRow = memo(function StatusRow({ text, width }: { text: string; width
   );
 });
 
+/**
+ * Blank lines above an item. Turns and tool blocks breathe; a status line
+ * annotates whatever precedes it, so it sits directly beneath it.
+ */
+function spacingBefore(
+  item: TimelineItem,
+  previous: TimelineItem | undefined,
+  atVeryTop: boolean,
+): number {
+  if (item.kind === "status") return 0;
+  // The first item still needs air under the welcome block, but not when it
+  // is the very first thing on screen.
+  if (!previous) return atVeryTop ? 0 : 1;
+  return 1;
+}
+
 const TimelineItemView = memo(function TimelineItemView({
   item,
   width,
   expandAll,
+  isLast,
 }: {
   item: TimelineItem;
   width: number;
   expandAll: boolean;
+  isLast?: boolean;
 }) {
   switch (item.kind) {
     case "user":
@@ -268,7 +318,7 @@ const TimelineItemView = memo(function TimelineItemView({
     case "todos":
       return <Todos todos={item.todos} width={width} />;
     case "tool":
-      return <ToolRow item={item} width={width} expandAll={expandAll} />;
+      return <ToolRow item={item} width={width} expandAll={expandAll} isLast={isLast} />;
     case "status":
       return <StatusRow text={item.text} width={width} />;
     case "error":
@@ -308,27 +358,41 @@ export const Timeline = memo(function Timeline({
         rootOptions: { flexGrow: 1, width: "100%" },
         wrapperOptions: { flexGrow: 1 },
         viewportOptions: { flexGrow: 1 },
-        contentOptions: { flexDirection: "column", width: "100%", gap: 1 },
-        scrollbarOptions: {
-          trackOptions: {
-            foregroundColor: colors.accentDim,
-            backgroundColor: colors.borderMuted,
-          },
-        },
+        // Spacing is decided per item rather than by a uniform gap, so a status
+        // line can hug what it annotates instead of floating between blanks.
+        contentOptions: { flexDirection: "column", width: "100%" },
+        // The transcript scrolls with the terminal's own conventions; a drawn
+        // scrollbar is just a column of noise beside the text.
+        verticalScrollbarOptions: { visible: false },
+        horizontalScrollbarOptions: { visible: false },
       }}
     >
       {welcome}
-      {items.map((item) => (
-        <TimelineItemView
+      {items.map((item, index) => (
+        <box
           key={item.id}
-          item={item}
-          width={width}
-          expandAll={Boolean(expandAll)}
-        />
+          flexDirection="column"
+          width="100%"
+          flexShrink={0}
+          marginTop={spacingBefore(item, items[index - 1], index === 0 && !welcome)}
+        >
+          <TimelineItemView
+            item={item}
+            width={width}
+            expandAll={Boolean(expandAll)}
+            isLast={index === items.length - 1 && !thinking && !streaming}
+          />
+        </box>
       ))}
-      {thinking ? <Thinking key="live-thinking" text={thinking} width={width} /> : null}
+      {thinking ? (
+        <box flexDirection="column" width="100%" flexShrink={0} marginTop={1}>
+          <Thinking text={thinking} width={width} />
+        </box>
+      ) : null}
       {streaming ? (
-        <AssistantMarkdown key="live-response" text={streaming} streaming />
+        <box flexDirection="column" width="100%" flexShrink={0} marginTop={1}>
+          <LiveAssistantText text={streaming} width={width} />
+        </box>
       ) : null}
     </scrollbox>
   );

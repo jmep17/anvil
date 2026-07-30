@@ -93,6 +93,9 @@ export function App({
   const [expandTools, setExpandTools] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [contextUsed, setContextUsed] = useState(0);
+  // Recomputed at turn boundaries only: estimateTokens walks the whole
+  // conversation, which is far too costly to redo on every streamed frame.
+  const [contextTokens, setContextTokens] = useState(0);
   const [queued, setQueued] = useState(0);
   const queuedRef = useRef<string[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
@@ -495,9 +498,9 @@ export function App({
       } finally {
         setBusy(false);
         abortRef.current = null;
-        setContextUsed(
-          estimateTokens(messagesRef.current) / Math.max(1, configRef.current.contextLength),
-        );
+        const tokens = estimateTokens(messagesRef.current);
+        setContextTokens(tokens);
+        setContextUsed(tokens / Math.max(1, configRef.current.contextLength));
       }
     },
     [
@@ -561,6 +564,7 @@ export function App({
       setSession(store);
       setItems(transcript);
       setResumedCount(loaded.length);
+      setContextTokens(estimateTokens(loaded));
       setContextUsed(estimateTokens(loaded) / Math.max(1, configRef.current.contextLength));
       push(
         {
@@ -594,6 +598,7 @@ export function App({
         setItems(transcript);
       }
       if (loaded.length > 0) setResumedCount(loaded.length);
+      setContextTokens(estimateTokens(loaded));
       setContextUsed(estimateTokens(loaded) / Math.max(1, config.contextLength));
       const online = await checkConnection(config);
       if (online && initialPrompt && !startedRef.current) {
@@ -780,7 +785,7 @@ export function App({
           {busy ? (
             <Working
               startedAt={startedAt}
-              tokens={estimateTokens(messagesRef.current)}
+              tokens={contextTokens}
               queued={queued}
             />
           ) : null}

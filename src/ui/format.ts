@@ -138,8 +138,14 @@ export function summarizeToolResult(
   }
 }
 
+/**
+ * Durations are only worth a column when they are long enough to have been
+ * felt. Stamping "40ms" on every row is noise, so anything quick renders
+ * blank.
+ */
+export const SLOW_TOOL_MS = 1_000;
+
 export function formatToolDuration(ms?: number): string {
-  if (ms == null || !Number.isFinite(ms)) return "";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms == null || !Number.isFinite(ms) || ms < SLOW_TOOL_MS) return "";
   return `${(ms / 1000).toFixed(1)}s`;
 }
