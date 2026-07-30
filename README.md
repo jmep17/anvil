@@ -45,7 +45,7 @@ bun run anvil -- -p -y "list files and summarize README.md"
 | TodoWrite | Task checklist |
 | Task | Isolated subagent |
 | Skill | On-demand markdown playbooks |
-| MCP `mcp_<server>_*` | External tools from config |
+| MCP `mcp_<server>_*` | External tools from config (registered with each server's own argument schema; non-read-only tools are permission-gated) |
 
 ## Modes
 
@@ -80,6 +80,7 @@ Enter `/` to open a completion menu. The same commands work in the TUI and the R
 | `/clear` | Clear the transcript and start a fresh context |
 | `/compact` | Summarize the conversation to free up context |
 | `/status` | Model, mode, context usage, session id |
+| `/resume` | Switch to an earlier session in this project (TUI only) |
 | `/mode plan\|build` | Switch modes |
 | `/config` | Interactive settings panel (TUI only) |
 | `/retry` | Recheck the configured model server after an offline error |
@@ -219,6 +220,7 @@ anvil -m <model>
 anvil config
 anvil config set model <id>
 anvil --resume <session-id>
+anvil -c                  # resume the most recent session here
 anvil --base-url http://localhost:1234/v1
 ```
 

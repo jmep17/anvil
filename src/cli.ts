@@ -30,6 +30,40 @@ export function findSubcommandIndex(argv: string[]): number {
   return -1;
 }
 
+/**
+ * Pick the session this run should use. Returns null when the request cannot
+ * be satisfied — a mistyped id used to silently start an empty session under
+ * a new file, losing the conversation the user meant to continue.
+ */
+export async function openSession(
+  cwd: string,
+  values: { resume?: unknown; continue?: unknown },
+): Promise<SessionStore | null> {
+  const wantsContinue = Boolean(values.continue);
+  // `--resume` with no value means "let me choose".
+  const resumeId = typeof values.resume === "string" ? values.resume.trim() : "";
+  const wantsPicker = values.resume === true || (Boolean(values.resume) && !resumeId);
+
+  if (resumeId) {
+    const store = await SessionStore.open(cwd, resumeId);
+    if (await store.exists()) return store;
+    console.error(`anvil: no session "${resumeId}" for this project.`);
+    const known = await SessionStore.listIds(cwd);
+    if (known.length) {
+      console.error(`Recent sessions:\n${known.slice(0, 5).map((id) => `  ${id}`).join("\n")}`);
+    }
+    return null;
+  }
+
+  if (wantsContinue || wantsPicker) {
+    const recent = await SessionStore.mostRecent(cwd);
+    if (recent) return await SessionStore.open(cwd, recent);
+    console.error("anvil: no earlier sessions for this project; starting a new one.");
+  }
+
+  return await SessionStore.create(cwd);
+}
+
 export async function runCli(argv: string[] = Bun.argv.slice(2)): Promise<void> {
   const subIdx = findSubcommandIndex(argv);
 
@@ -61,6 +95,7 @@ export async function runCli(argv: string[] = Bun.argv.slice(2)): Promise<void> 
       model: { type: "string", short: "m" },
       mode: { type: "string" },
       resume: { type: "string" },
+      continue: { type: "boolean", short: "c" },
       "base-url": { type: "string" },
       cwd: { type: "string" },
     },
@@ -96,9 +131,11 @@ export async function runCli(argv: string[] = Bun.argv.slice(2)): Promise<void> 
     (!values.repl && !values.print && process.stdout.isTTY && !prompt);
 
   // Sessions only for the agent — never for `anvil config`.
-  const session = values.resume
-    ? await SessionStore.open(cwd, String(values.resume))
-    : await SessionStore.create(cwd);
+  const session = await openSession(cwd, values);
+  if (!session) {
+    process.exitCode = 1;
+    return;
+  }
 
   if (wantTui && !values.repl) {
     try {
@@ -127,10 +164,11 @@ Usage:
   anvil                     Interactive session (TUI if tty, else REPL)
   anvil -p "prompt"         One-shot prompt (auto-approve tools)
   anvil --repl              Force classic REPL
-  anvil --tui               Force Ink TUI
+  anvil --tui               Force the TUI
   anvil --mode plan|build   Start in plan (read-only) or build mode
   anvil -m <model>          Override model id for this run
-  anvil --resume <id>       Resume a session id
+  anvil --resume <id>       Resume a specific session id
+  anvil -c, --continue      Resume the most recent session for this project
   anvil --base-url <url>    LM Studio OpenAI base URL
   anvil --cwd <path>        Working directory
 
@@ -138,6 +176,8 @@ Usage:
   anvil config set model <id>
   anvil config set contextLength 65536
   anvil config unset model --project
+
+Inside the TUI, /resume lists earlier sessions to switch between.
 
 Environment:
   ANVIL_BASE_URL  ANVIL_MODEL  ANVIL_API_KEY

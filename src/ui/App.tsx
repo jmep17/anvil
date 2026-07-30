@@ -15,7 +15,7 @@ import { runAgent } from "../agent/loop.ts";
 import { probeServer } from "../agent/model.ts";
 import { formatReviewedPlan, type ReviewedPlan } from "../agent/planHarness.ts";
 import type { AgentMode, AnvilConfig } from "../config/types.ts";
-import { SessionStore } from "../session/store.ts";
+import { SessionStore, type SessionSummary } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
 import { allowAll } from "../tools/permissions.ts";
 import { CommandPicker, commandPickerRows } from "./CommandPicker.tsx";
@@ -31,6 +31,7 @@ import {
   permissionContentRows,
   planReviewContentRows,
 } from "./InputBox.tsx";
+import { SessionPicker, sessionPickerRows } from "./SessionPicker.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { Welcome, welcomeHeight } from "./Welcome.tsx";
 import { Working, workingHeight } from "./Working.tsx";
@@ -53,7 +54,15 @@ interface Props {
   initialPrompt?: string;
 }
 
-export function App({ config: initialConfig, cwd, session, yes, initialPrompt }: Props) {
+export function App({
+  config: initialConfig,
+  cwd,
+  session: initialSession,
+  yes,
+  initialPrompt,
+}: Props) {
+  // Stateful so /resume can swap the whole conversation without restarting.
+  const [session, setSession] = useState(initialSession);
   const renderer = useRenderer();
   const { width: columns, height: rows } = useTerminalDimensions();
   const scrollRef = useRef<ScrollBoxRenderable>(null);
@@ -89,6 +98,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const [exitArmed, setExitArmed] = useState(false);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [resumedCount, setResumedCount] = useState(0);
+  const [sessionPicker, setSessionPicker] = useState<{
+    sessions: SessionSummary[];
+    selected: number;
+  } | null>(null);
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
   const messagesRef = useRef<ModelMessage[]>([]);
@@ -295,6 +308,12 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             return;
           case "retry":
             void checkConnection();
+            return;
+          case "resume":
+            void (async () => {
+              const sessions = await SessionStore.list(cwd);
+              setSessionPicker({ sessions, selected: 0 });
+            })();
             return;
           case "help":
             push({ kind: "assistant", id: nextId("a"), text: helpText() }, false);
@@ -508,7 +527,11 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   const prompt = usePromptInput({
     busy,
-    blocked: Boolean(pendingPermission) || showConfig || planReview?.phase === "ready",
+    blocked:
+      Boolean(pendingPermission) ||
+      showConfig ||
+      Boolean(sessionPicker) ||
+      planReview?.phase === "ready",
     editorMode: config.ui.editorMode,
     editor: config.ui.editor,
     cwd,
@@ -518,8 +541,36 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     onToggleAgentMode: toggleMode,
     allowModeToggle: !planReview,
     onPasteNotice: (msg) => push({ kind: "status", id: nextId("s"), text: msg }),
-    isActive: !showConfig && !pendingPermission,
+    isActive: !showConfig && !pendingPermission && !sessionPicker,
   });
+
+  /** Swap the live conversation for an earlier one, transcript and all. */
+  const openSession = useCallback(
+    async (id: string) => {
+      setSessionPicker(null);
+      if (id === session.id) return;
+      const store = await SessionStore.open(cwd, id);
+      const [loaded, transcript] = await Promise.all([
+        store.loadMessages(),
+        store.loadTimeline(),
+      ]);
+      messagesRef.current = loaded;
+      syncNextId(transcript);
+      setSession(store);
+      setItems(transcript);
+      setResumedCount(loaded.length);
+      setContextUsed(estimateTokens(loaded) / Math.max(1, configRef.current.contextLength));
+      push(
+        {
+          kind: "status",
+          id: nextId("s"),
+          text: `resumed session ${id} · ${loaded.length} message${loaded.length === 1 ? "" : "s"}`,
+        },
+        false,
+      );
+    },
+    [cwd, push, session.id],
+  );
 
   const approvePlan = useCallback(() => {
     if (planReview?.phase !== "ready") return;
@@ -556,7 +607,8 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const planDenyExtra = planReview?.phase === "denying" ? 1 : 0;
   const pickerExtra =
     (prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0) +
-    (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0);
+    (prompt.commandPicker ? commandPickerRows(prompt.commandPicker.matches) : 0) +
+    (sessionPicker ? sessionPickerRows(sessionPicker.sessions) : 0);
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80)
     : planReview?.phase === "ready"
@@ -606,6 +658,26 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       return;
     }
     if (exitArmed) setExitArmed(false);
+
+    if (sessionPicker) {
+      if (key.name === "escape") {
+        setSessionPicker(null);
+      } else if (key.name === "up" || key.name === "down") {
+        const count = sessionPicker.sessions.length;
+        if (count > 0) {
+          const delta = key.name === "up" ? -1 : 1;
+          setSessionPicker({
+            ...sessionPicker,
+            selected: (sessionPicker.selected + delta + count) % count,
+          });
+        }
+      } else if (key.name === "return") {
+        const chosen = sessionPicker.sessions[sessionPicker.selected];
+        if (chosen) void openSession(chosen.id);
+        else setSessionPicker(null);
+      }
+      return;
+    }
 
     if (pendingPermission) {
       const ch = keyChar(key);
@@ -722,6 +794,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             <CommandPicker
               matches={prompt.commandPicker.matches}
               selected={prompt.commandPicker.selected}
+              columns={columns || 80}
+            />
+          ) : null}
+          {sessionPicker ? (
+            <SessionPicker
+              sessions={sessionPicker.sessions}
+              selected={sessionPicker.selected}
+              currentId={session.id}
               columns={columns || 80}
             />
           ) : null}

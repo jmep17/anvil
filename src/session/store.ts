@@ -100,7 +100,13 @@ export class SessionStore {
     return items;
   }
 
-  static async list(cwd: string): Promise<string[]> {
+  /** True when this session has a file on disk (i.e. it is not brand new). */
+  async exists(): Promise<boolean> {
+    return await Bun.file(this.path).exists();
+  }
+
+  /** Session ids for this project, newest first. Ids sort chronologically. */
+  static async listIds(cwd: string): Promise<string[]> {
     const dir = sessionDir(cwd);
     try {
       const glob = new Bun.Glob("*.jsonl");
@@ -113,4 +119,93 @@ export class SessionStore {
       return [];
     }
   }
+
+  /**
+   * Summaries for the resume picker, newest first. Reading each file is the
+   * only way to get a preview, so the scan is capped.
+   */
+  static async list(cwd: string, limit = 20): Promise<SessionSummary[]> {
+    const ids = (await SessionStore.listIds(cwd)).slice(0, limit);
+    const summaries: SessionSummary[] = [];
+    for (const id of ids) {
+      const store = new SessionStore(cwd, id);
+      summaries.push(await store.summarize());
+    }
+    return summaries;
+  }
+
+  /** Most recent session for this project, or null when there is none. */
+  static async mostRecent(cwd: string): Promise<string | null> {
+    return (await SessionStore.listIds(cwd))[0] ?? null;
+  }
+
+  private async summarize(): Promise<SessionSummary> {
+    const file = Bun.file(this.path);
+    let messageCount = 0;
+    let preview = "";
+    let updatedAt = "";
+    if (await file.exists()) {
+      const text = await file.text();
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const row = JSON.parse(line) as {
+            type?: string;
+            ts?: string;
+            message?: ModelMessage;
+          };
+          if (row.ts) updatedAt = row.ts;
+          if (row.type !== "message" || !row.message) continue;
+          messageCount += 1;
+          if (!preview && row.message.role === "user") {
+            preview = previewOf(row.message);
+          }
+        } catch {
+          // Skip partial or legacy lines.
+        }
+      }
+    }
+    return { id: this.id, updatedAt, messageCount, preview };
+  }
+}
+
+export interface SessionSummary {
+  id: string;
+  /** Timestamp of the last record written, ISO-8601. Empty when unknown. */
+  updatedAt: string;
+  messageCount: number;
+  /** First user message, flattened and clipped. */
+  preview: string;
+}
+
+const PREVIEW_LENGTH = 80;
+
+function previewOf(message: ModelMessage): string {
+  let text = "";
+  if (typeof message.content === "string") {
+    text = message.content;
+  } else if (Array.isArray(message.content)) {
+    text = message.content
+      .flatMap((part) => ("text" in part && typeof part.text === "string" ? [part.text] : []))
+      .join(" ");
+  }
+  // Inlined @-mention file bodies would swamp the preview.
+  const trimmed = text.replace(/<file path="[\s\S]*?<\/file>/g, " ").replace(/\s+/g, " ").trim();
+  if (trimmed.length <= PREVIEW_LENGTH) return trimmed;
+  return `${trimmed.slice(0, PREVIEW_LENGTH - 1)}…`;
+}
+
+/** `3 minutes ago` — relative time for the picker. */
+export function relativeTime(iso: string, now = Date.now()): string {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "unknown";
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(then).toISOString().slice(0, 10);
 }

@@ -12,6 +12,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: "clear", description: "Clear the transcript and start a fresh context" },
   { name: "compact", description: "Summarize the conversation to free up context" },
   { name: "status", description: "Show model, mode, context usage and session id" },
+  { name: "resume", description: "Switch to an earlier session in this project", tuiOnly: true },
   { name: "mode", args: "plan|build", description: "Switch between plan and build mode" },
   { name: "config", description: "Open the settings panel", tuiOnly: true },
   { name: "retry", description: "Re-check the model server after an offline error" },
