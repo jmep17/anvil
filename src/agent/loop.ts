@@ -17,6 +17,7 @@ import {
 } from "../tools/index.ts";
 import type { PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
+import { nextStepInstructions } from "./discipline.ts";
 import { createModel } from "./model.ts";
 import { shouldPauseReadTool } from "./stall.ts";
 import { buildSystemPrompt } from "./system.ts";
@@ -167,14 +168,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     stopWhen: isStepCount(opts.config.maxSteps),
     maxRetries: 2,
     prepareStep: ({ steps }) => {
-      if (!shouldPauseReadTool(steps)) return undefined;
+      const pauseRead = shouldPauseReadTool(steps);
+      const instructions = nextStepInstructions(
+        system,
+        Boolean(steps.at(-1)?.toolCalls.length),
+      );
+      if (!pauseRead && !instructions) return undefined;
 
-      opts.onEvent?.({
-        type: "status",
-        message: "Repeated Read paused for one step; choose an action or report the blocker.",
-      });
+      if (pauseRead) {
+        opts.onEvent?.({
+          type: "status",
+          message: "Repeated Read paused for one step; choose an action or report the blocker.",
+        });
+      }
       return {
-        activeTools: Object.keys(tools).filter((name) => name !== "Read"),
+        ...(instructions ? { instructions } : {}),
+        ...(pauseRead ? { activeTools: Object.keys(tools).filter((name) => name !== "Read") } : {}),
       };
     },
     onError: ({ error }) => {
@@ -184,9 +193,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
       });
     },
     onChunk: ({ chunk }) => {
-      if (chunk.type === "text-delta") {
-        opts.onEvent?.({ type: "text", text: chunk.text });
-      } else if (chunk.type === "reasoning-delta") {
+      // Reasoning is intentionally surfaced. User-facing prose is held until
+      // step completion so tentative pre-tool chatter cannot pollute the transcript.
+      if (chunk.type === "reasoning-delta") {
         opts.onEvent?.({ type: "thinking", text: chunk.text });
       }
     },
@@ -228,8 +237,11 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
         ms: toolExecutionMs,
       });
     },
-    onStepFinish: async () => {
+    onStepFinish: async ({ text, toolCalls }) => {
       step += 1;
+      if (toolCalls.length === 0 && text) {
+        opts.onEvent?.({ type: "text", text });
+      }
       opts.onEvent?.({ type: "step", step });
     },
   });

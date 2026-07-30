@@ -39,6 +39,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Recommended skills: shadcn, frontend");
     expect(prompt).toContain("Use Bun");
     expect(prompt).toContain("Do not repeat an identical Read");
+    expect(prompt).toContain("Goal → Evidence → Decision → Next action");
     expect(prompt).toContain("do not stop after saying what you intend to implement");
   });
 

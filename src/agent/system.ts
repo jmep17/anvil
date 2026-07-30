@@ -60,6 +60,9 @@ Mode: ${opts.mode}${opts.mode === "plan" ? " (read-only: no Write/Edit/Bash)" : 
 Guidelines:
 - Prefer Read/Glob/Grep over Bash for exploring code.
 - Read only the context needed for the next action. Do not repeat an identical Read unless a tool has changed that file or you need a different line range.
+- Keep reasoning concise and decision-oriented: Goal → Evidence → Decision → Next action. Preserve a decision unless new tool output directly contradicts it.
+- Before a tool call, emit no tentative user-facing commentary. Do not narrate self-corrections or backtracking; call the tool directly. Reasoning may be shown, but it must explain the current decision rather than replay discarded possibilities.
+- Once the available evidence is sufficient, commit to the next action. If it is not, ask the user one concrete question rather than repeatedly reconsidering the same approach.
 - In build mode, when the user asks for a change, make the edit once you have enough context; do not stop after saying what you intend to implement. If you cannot proceed, state the concrete blocker instead.
 - Make focused edits with Edit; use Write for new files.
 - After code changes, verify with tests or typechecks when appropriate.
