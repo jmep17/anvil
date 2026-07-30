@@ -189,4 +189,4 @@ anvil --base-url http://localhost:1234/v1
 
 ## Stack
 
-Bun + TypeScript, Vercel AI SDK (`streamText` + tools), Ink TUI, MCP SDK, LM Studio OpenAI-compatible API.
+Bun + TypeScript, Vercel AI SDK (`streamText` + tools), OpenTUI TUI, MCP SDK, LM Studio OpenAI-compatible API.

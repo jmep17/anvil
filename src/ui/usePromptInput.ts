@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useInput, usePaste, type Key } from "ink";
+import { decodePasteBytes, type KeyEvent } from "@opentui/core";
+import { useKeyboard, usePaste } from "@opentui/react";
 import type { EditorMode } from "../config/types.ts";
 import {
   backspace,
@@ -28,6 +29,7 @@ import {
   activeMentionQuery,
   applyMentionSelection,
 } from "./fileMentions.ts";
+import { keyChar } from "./keys.ts";
 
 export type VimMode = "insert" | "normal";
 
@@ -58,16 +60,15 @@ interface Options {
   isActive?: boolean;
 }
 
-function applyEmacsNav(buf: TextBuffer, ch: string, key: Key): TextBuffer | null {
-  if (key.leftArrow) return moveLeft(buf);
-  if (key.rightArrow) return moveRight(buf);
-  if (key.upArrow) return moveUp(buf);
-  if (key.downArrow) return moveDown(buf);
-  if (key.home || (key.ctrl && ch === "a")) return lineHome(buf);
-  if (key.end || (key.ctrl && ch === "e")) return lineEnd(buf);
-  if (key.ctrl && ch === "u") return clearLine(buf);
-  if (key.ctrl && ch === "w") {
-    // delete word backward via repeated backspace on whitespace boundary
+function applyEmacsNav(buf: TextBuffer, key: KeyEvent): TextBuffer | null {
+  if (key.name === "left") return moveLeft(buf);
+  if (key.name === "right") return moveRight(buf);
+  if (key.name === "up") return moveUp(buf);
+  if (key.name === "down") return moveDown(buf);
+  if (key.name === "home" || (key.ctrl && key.name === "a")) return lineHome(buf);
+  if (key.name === "end" || (key.ctrl && key.name === "e")) return lineEnd(buf);
+  if (key.ctrl && key.name === "u") return clearLine(buf);
+  if (key.ctrl && key.name === "w") {
     let i = buf.cursor;
     while (i > 0 && /\s/.test(buf.value[i - 1]!)) i--;
     while (i > 0 && !/\s/.test(buf.value[i - 1]!)) i--;
@@ -117,7 +118,6 @@ export function usePromptInput(opts: Options) {
     setPickerDismissed(true);
   }, []);
 
-  // Keep file picker in sync with the active @ mention.
   useEffect(() => {
     const o = optsRef.current;
     const vim = o.editorMode === "vim";
@@ -159,28 +159,27 @@ export function usePromptInput(opts: Options) {
     })();
   }, [buffer.value, buffer.cursor, pickerDismissed, vimMode, opts.busy, opts.blocked, opts.cwd, opts.editorMode]);
 
-  // Warm the file index once when the prompt becomes interactive.
   useEffect(() => {
-    void listProjectFiles(opts.cwd).then((files) => {
-      filesRef.current = files;
-    }).catch(() => {});
+    void listProjectFiles(opts.cwd)
+      .then((files) => {
+        filesRef.current = files;
+      })
+      .catch(() => {});
   }, [opts.cwd]);
 
-  usePaste(
-    (text) => {
-      if (opts.busy || opts.blocked || editingRef.current) return;
-      const cleaned = normalizePaste(text);
-      setBuffer((b) => insert(b, cleaned));
-      const lines = cleaned.split("\n").length;
-      if (cleaned.length > 200 || lines > 1) {
-        const msg = `pasted ${cleaned.length} chars · ${lines} line${lines === 1 ? "" : "s"}`;
-        setPasteHint(msg);
-        opts.onPasteNotice?.(msg);
-        setTimeout(() => setPasteHint(null), 2500);
-      }
-    },
-    { isActive: opts.isActive !== false && !opts.busy && !opts.blocked },
-  );
+  usePaste((event) => {
+    if (opts.isActive === false || opts.busy || opts.blocked || editingRef.current) return;
+    const text = decodePasteBytes(event.bytes);
+    const cleaned = normalizePaste(text);
+    setBuffer((b) => insert(b, cleaned));
+    const lines = cleaned.split("\n").length;
+    if (cleaned.length > 200 || lines > 1) {
+      const msg = `pasted ${cleaned.length} chars · ${lines} line${lines === 1 ? "" : "s"}`;
+      setPasteHint(msg);
+      opts.onPasteNotice?.(msg);
+      setTimeout(() => setPasteHint(null), 2500);
+    }
+  });
 
   const openEditor = useCallback(async () => {
     if (opts.busy || opts.blocked || editingRef.current) return;
@@ -197,204 +196,195 @@ export function usePromptInput(opts: Options) {
     }
   }, [opts.blocked, opts.busy, opts.editor, opts.suspendTerminal]);
 
-  useInput(
-    (ch, key) => {
-      if (opts.blocked || editingRef.current) return;
+  useKeyboard((key: KeyEvent) => {
+    if (opts.isActive === false) return;
+    if (opts.blocked || editingRef.current) return;
 
-      if (key.escape && opts.busy) {
-        opts.onAbort();
+    if (key.name === "escape" && opts.busy) {
+      opts.onAbort();
+      return;
+    }
+    if (opts.busy) return;
+
+    if (key.shift && key.name === "tab") {
+      opts.onToggleAgentMode();
+      return;
+    }
+
+    if (key.ctrl && key.name === "g") {
+      void openEditor();
+      return;
+    }
+
+    const vim = opts.editorMode === "vim";
+    const pickerOpen = Boolean(filePicker) && (!vim || vimMode === "insert");
+    const ch = keyChar(key);
+
+    if (pickerOpen && filePicker) {
+      if (key.name === "escape") {
+        setPickerDismissed(true);
+        setFilePicker(null);
         return;
       }
-      if (opts.busy) return;
-
-      if (key.shift && key.tab) {
-        opts.onToggleAgentMode();
+      if (key.name === "up") {
+        setFilePicker((p) =>
+          p && p.matches.length
+            ? { ...p, selected: (p.selected - 1 + p.matches.length) % p.matches.length }
+            : p,
+        );
         return;
       }
-
-      // Ctrl+G → external editor
-      if (key.ctrl && ch === "g") {
-        void openEditor();
+      if (key.name === "down") {
+        setFilePicker((p) =>
+          p && p.matches.length
+            ? { ...p, selected: (p.selected + 1) % p.matches.length }
+            : p,
+        );
         return;
       }
-
-      const vim = opts.editorMode === "vim";
-      const pickerOpen = Boolean(filePicker) && (!vim || vimMode === "insert");
-
-      // File picker key handling
-      if (pickerOpen && filePicker) {
-        if (key.escape) {
-          setPickerDismissed(true);
-          setFilePicker(null);
+      if (key.name === "tab" || (key.name === "return" && filePicker.matches.length > 0 && !key.shift)) {
+        const path = filePicker.matches[filePicker.selected];
+        if (path) {
+          selectMention(path);
           return;
         }
-        if (key.upArrow) {
-          setFilePicker((p) =>
-            p && p.matches.length
-              ? { ...p, selected: (p.selected - 1 + p.matches.length) % p.matches.length }
-              : p,
-          );
-          return;
-        }
-        if (key.downArrow) {
-          setFilePicker((p) =>
-            p && p.matches.length
-              ? { ...p, selected: (p.selected + 1) % p.matches.length }
-              : p,
-          );
-          return;
-        }
-        if (key.tab || (key.return && filePicker.matches.length > 0 && !key.shift)) {
-          const path = filePicker.matches[filePicker.selected];
-          if (path) {
-            selectMention(path);
-            return;
-          }
-        }
-        // Enter with empty matches → fall through to submit
-        if (key.return && filePicker.matches.length === 0 && !key.shift) {
-          const value = buffer.value;
-          resetBuffer();
-          opts.onSubmit(value);
-          return;
-        }
-        if (key.tab) return; // tab with no matches: swallow
       }
-
-      // Esc handling
-      if (key.escape) {
-        if (vim && vimMode === "insert") {
-          setVimMode("normal");
-          pendingD.current = false;
-          return;
-        }
-        if (buffer.value) {
-          resetBuffer();
-        }
-        return;
-      }
-
-      // Newline
-      if (key.ctrl && (ch === "j" || ch === "\n" || ch === "\r")) {
-        if (!vim || vimMode === "insert") {
-          setBuffer((b) => insert(b, "\n"));
-        }
-        return;
-      }
-      if (key.return && key.shift) {
-        if (!vim || vimMode === "insert") {
-          setBuffer((b) => insert(b, "\n"));
-        }
-        return;
-      }
-
-      // Submit
-      if (key.return) {
+      if (key.name === "return" && filePicker.matches.length === 0 && !key.shift) {
         const value = buffer.value;
         resetBuffer();
         opts.onSubmit(value);
         return;
       }
+      if (key.name === "tab") return;
+    }
 
-      // Vim normal mode
-      if (vim && vimMode === "normal") {
-        if (pendingD.current) {
-          pendingD.current = false;
-          if (ch === "d") {
-            setBuffer((b) => deleteLine(b));
-          }
-          return;
-        }
+    if (key.name === "escape") {
+      if (vim && vimMode === "insert") {
+        setVimMode("normal");
+        pendingD.current = false;
+        return;
+      }
+      if (buffer.value) {
+        resetBuffer();
+      }
+      return;
+    }
+
+    if (key.ctrl && (key.name === "j" || key.name === "return")) {
+      if (!vim || vimMode === "insert") {
+        setBuffer((b) => insert(b, "\n"));
+      }
+      return;
+    }
+    if (key.name === "return" && key.shift) {
+      if (!vim || vimMode === "insert") {
+        setBuffer((b) => insert(b, "\n"));
+      }
+      return;
+    }
+
+    if (key.name === "return") {
+      const value = buffer.value;
+      resetBuffer();
+      opts.onSubmit(value);
+      return;
+    }
+
+    if (vim && vimMode === "normal") {
+      if (pendingD.current) {
+        pendingD.current = false;
         if (ch === "d") {
-          pendingD.current = true;
-          return;
-        }
-        if (ch === "h" || key.leftArrow) {
-          setBuffer((b) => moveLeft(b));
-          return;
-        }
-        if (ch === "l" || key.rightArrow) {
-          setBuffer((b) => moveRight(b));
-          return;
-        }
-        if (ch === "k" || key.upArrow) {
-          setBuffer((b) => moveUp(b));
-          return;
-        }
-        if (ch === "j" || key.downArrow) {
-          setBuffer((b) => moveDown(b));
-          return;
-        }
-        if (ch === "0") {
-          setBuffer((b) => lineHome(b));
-          return;
-        }
-        if (ch === "$") {
-          setBuffer((b) => lineEnd(b));
-          return;
-        }
-        if (ch === "w") {
-          setBuffer((b) => wordForward(b));
-          return;
-        }
-        if (ch === "b") {
-          setBuffer((b) => wordBackward(b));
-          return;
-        }
-        if (ch === "x") {
-          setBuffer((b) => del(b));
-          return;
-        }
-        if (ch === "i") {
-          setVimMode("insert");
-          return;
-        }
-        if (ch === "a") {
-          setBuffer((b) => moveRight(b));
-          setVimMode("insert");
-          return;
-        }
-        if (ch === "I") {
-          setBuffer((b) => lineHome(b));
-          setVimMode("insert");
-          return;
-        }
-        if (ch === "A") {
-          setBuffer((b) => lineEnd(b));
-          setVimMode("insert");
-          return;
-        }
-        if (ch === "o") {
-          setBuffer((b) => openLineBelow(b));
-          setVimMode("insert");
-          return;
-        }
-        if (ch === "O") {
-          setBuffer((b) => openLineAbove(b));
-          setVimMode("insert");
-          return;
+          setBuffer((b) => deleteLine(b));
         }
         return;
       }
-
-      // Insert / emacs — skip vertical nav when picker is open (handled above)
-      if (pickerOpen && (key.upArrow || key.downArrow)) return;
-
-      if (key.backspace || key.delete || (ch && !key.ctrl && !key.meta)) {
-        setPickerDismissed(false);
+      if (ch === "d") {
+        pendingD.current = true;
+        return;
       }
+      if (ch === "h" || key.name === "left") {
+        setBuffer((b) => moveLeft(b));
+        return;
+      }
+      if (ch === "l" || key.name === "right") {
+        setBuffer((b) => moveRight(b));
+        return;
+      }
+      if (ch === "k" || key.name === "up") {
+        setBuffer((b) => moveUp(b));
+        return;
+      }
+      if (ch === "j" || key.name === "down") {
+        setBuffer((b) => moveDown(b));
+        return;
+      }
+      if (ch === "0") {
+        setBuffer((b) => lineHome(b));
+        return;
+      }
+      if (ch === "$") {
+        setBuffer((b) => lineEnd(b));
+        return;
+      }
+      if (ch === "w") {
+        setBuffer((b) => wordForward(b));
+        return;
+      }
+      if (ch === "b") {
+        setBuffer((b) => wordBackward(b));
+        return;
+      }
+      if (ch === "x") {
+        setBuffer((b) => del(b));
+        return;
+      }
+      if (ch === "i") {
+        setVimMode("insert");
+        return;
+      }
+      if (ch === "a") {
+        setBuffer((b) => moveRight(b));
+        setVimMode("insert");
+        return;
+      }
+      if (ch === "I") {
+        setBuffer((b) => lineHome(b));
+        setVimMode("insert");
+        return;
+      }
+      if (ch === "A") {
+        setBuffer((b) => lineEnd(b));
+        setVimMode("insert");
+        return;
+      }
+      if (ch === "o") {
+        setBuffer((b) => openLineBelow(b));
+        setVimMode("insert");
+        return;
+      }
+      if (ch === "O") {
+        setBuffer((b) => openLineAbove(b));
+        setVimMode("insert");
+        return;
+      }
+      return;
+    }
 
-      setBuffer((b) => {
-        const nav = applyEmacsNav(b, ch, key);
-        if (nav) return nav;
-        if (key.backspace) return backspace(b);
-        if (key.delete) return del(b);
-        if (ch && !key.ctrl && !key.meta) return insert(b, ch);
-        return b;
-      });
-    },
-    { isActive: opts.isActive !== false },
-  );
+    if (pickerOpen && (key.name === "up" || key.name === "down")) return;
+
+    if (key.name === "backspace" || key.name === "delete" || ch) {
+      setPickerDismissed(false);
+    }
+
+    setBuffer((b) => {
+      const nav = applyEmacsNav(b, key);
+      if (nav) return nav;
+      if (key.name === "backspace") return backspace(b);
+      if (key.name === "delete") return del(b);
+      if (ch) return insert(b, ch);
+      return b;
+    });
+  });
 
   return {
     buffer,

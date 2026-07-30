@@ -1,7 +1,7 @@
-import React from "react";
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import type { EditorMode } from "../config/types.ts";
 import { wrapDisplayLines } from "./format.ts";
+import { colors } from "./theme.ts";
 import type { VimMode } from "./usePromptInput.ts";
 
 export interface FooterState {
@@ -37,10 +37,12 @@ export function footerHeight(state: FooterState, columns: number): number {
 
 export function Footer({ columns, ...state }: FooterState & { columns: number }) {
   return (
-    <Box paddingX={1} flexDirection="column" flexShrink={0}>
+    <box paddingX={1} flexDirection="column" flexShrink={0}>
       {wrapDisplayLines(footerHint(state), Math.max(12, columns - 2)).map((line, index) => (
-        <Text key={index} dimColor>{`⌁ ${line}`}</Text>
+        <text key={index} fg={colors.muted} attributes={TextAttributes.DIM}>
+          {`⌁ ${line}`}
+        </text>
       ))}
-    </Box>
+    </box>
   );
 }

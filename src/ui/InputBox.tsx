@@ -1,6 +1,6 @@
-import React from "react";
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
 import { wrapDisplayLines } from "./format.ts";
+import { colors } from "./theme.ts";
 import type { VimMode } from "./usePromptInput.ts";
 
 function softWrap(line: string, width: number): string[] {
@@ -55,20 +55,39 @@ export function InputBox({
   if (pending) {
     const width = Math.max(12, columns - 4);
     return (
-      <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column" flexShrink={0}>
+      <box
+        border
+        borderStyle="rounded"
+        borderColor={colors.yellow}
+        paddingX={1}
+        flexDirection="column"
+        flexShrink={0}
+      >
         {wrapDisplayLines(`Permission required · ${pending.toolName}`, width).map((line, index) => (
-          <Text key={`title-${index}`} bold color="yellow">{line}</Text>
+          <text key={`title-${index}`} fg={colors.yellow} attributes={TextAttributes.BOLD}>
+            {line}
+          </text>
         ))}
         {wrapDisplayLines(pending.detail, width).map((line, index) => (
-          <Text key={`detail-${index}`} dimColor>{line}</Text>
+          <text key={`detail-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
+            {line}
+          </text>
         ))}
-        {pending.preview ? wrapDisplayLines(pending.preview, width).map((line, index) => (
-          <Text key={`preview-${index}`} color="cyan">{line}</Text>
-        )) : null}
-        {wrapDisplayLines("[a] allow once · [A] same action this session · [d] deny", width).map((line, index) => (
-          <Text key={`actions-${index}`} dimColor>{line}</Text>
-        ))}
-      </Box>
+        {pending.preview
+          ? wrapDisplayLines(pending.preview, width).map((line, index) => (
+              <text key={`preview-${index}`} fg={colors.cyan}>
+                {line}
+              </text>
+            ))
+          : null}
+        {wrapDisplayLines("[a] allow once · [A] same action this session · [d] deny", width).map(
+          (line, index) => (
+            <text key={`actions-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
+              {line}
+            </text>
+          ),
+        )}
+      </box>
     );
   }
 
@@ -92,30 +111,52 @@ export function InputBox({
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={busy ? "yellow" : "cyan"} paddingX={1} flexShrink={0}>
-      <Text bold color={busy ? "yellow" : "cyan"}>PROMPT{busy ? " · AGENT WORKING" : ""}</Text>
-      {editorMode === "vim" ? <Text dimColor>{vimMode === "normal" ? "-- NORMAL --" : "-- INSERT --"}</Text> : null}
-      {pasteHint ? <Text color="cyan">{pasteHint}</Text> : null}
+    <box
+      flexDirection="column"
+      border
+      borderStyle="rounded"
+      borderColor={busy ? colors.yellow : colors.cyan}
+      paddingX={1}
+      flexShrink={0}
+    >
+      <text fg={busy ? colors.yellow : colors.cyan} attributes={TextAttributes.BOLD}>
+        {`PROMPT${busy ? " · AGENT WORKING" : ""}`}
+      </text>
+      {editorMode === "vim" ? (
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          {vimMode === "normal" ? "-- NORMAL --" : "-- INSERT --"}
+        </text>
+      ) : null}
+      {pasteHint ? <text fg={colors.cyan}>{pasteHint}</text> : null}
       {lines.flatMap((line, lineIndex) => {
         const chunks = softWrap(line, width);
         return chunks.map((chunk, chunkIndex) => {
           const start = chunkIndex * width;
-          const active = !busy && lineIndex === cursorLine && cursorCol >= start && cursorCol <= start + chunk.length;
+          const active =
+            !busy && lineIndex === cursorLine && cursorCol >= start && cursorCol <= start + chunk.length;
           const localCursor = Math.max(0, Math.min(chunk.length, cursorCol - start));
           const prefix = lineIndex === 0 && chunkIndex === 0 ? "› " : "· ";
           if (!active) {
-            return <Box key={`${lineIndex}-${chunkIndex}`}><Text color="green">{prefix}</Text><Text>{chunk || " "}</Text></Box>;
+            return (
+              <box key={`${lineIndex}-${chunkIndex}`} flexDirection="row">
+                <text fg={colors.green}>{prefix}</text>
+                <text>{chunk || " "}</text>
+              </box>
+            );
           }
           const before = chunk.slice(0, localCursor);
           const at = chunk.slice(localCursor, localCursor + 1) || " ";
           const after = chunk.slice(localCursor + 1);
           return (
-            <Box key={`${lineIndex}-${chunkIndex}`}>
-              <Text color="green">{prefix}</Text><Text>{before}</Text><Text inverse>{at}</Text><Text>{after}</Text>
-            </Box>
+            <box key={`${lineIndex}-${chunkIndex}`} flexDirection="row">
+              <text fg={colors.green}>{prefix}</text>
+              <text>{before}</text>
+              <text attributes={TextAttributes.INVERSE}>{at}</text>
+              <text>{after}</text>
+            </box>
           );
         });
       })}
-    </Box>
+    </box>
   );
 }

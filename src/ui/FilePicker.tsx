@@ -1,5 +1,5 @@
-import React from "react";
-import { Box, Text } from "ink";
+import { TextAttributes } from "@opentui/core";
+import { colors } from "./theme.ts";
 
 export function FilePicker({
   matches,
@@ -14,27 +14,50 @@ export function FilePicker({
 }) {
   if (matches.length === 0) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
-        <Text dimColor>@{query || "…"} · no matching files</Text>
-      </Box>
+      <box
+        flexDirection="column"
+        border
+        borderStyle="rounded"
+        borderColor={colors.muted}
+        paddingX={1}
+        flexShrink={0}
+      >
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          {`@${query || "…"} · no matching files`}
+        </text>
+      </box>
     );
   }
 
   const width = Math.max(12, columns - 4);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} flexShrink={0}>
-      <Text dimColor>@{query || "…"} · {matches.length} file{matches.length === 1 ? "" : "s"}</Text>
+    <box
+      flexDirection="column"
+      border
+      borderStyle="rounded"
+      borderColor={colors.magenta}
+      paddingX={1}
+      flexShrink={0}
+    >
+      <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        {`@${query || "…"} · ${matches.length} file${matches.length === 1 ? "" : "s"}`}
+      </text>
       {matches.map((path, index) => {
         const active = index === selected;
         const label = path.length > width - 2 ? `…${path.slice(-(width - 3))}` : path;
         return (
-          <Text key={path} color={active ? "magenta" : undefined} inverse={active} bold={active}>
-            {active ? "› " : "  "}
-            {label}
-          </Text>
+          <text
+            key={path}
+            fg={active ? colors.magenta : colors.text}
+            attributes={
+              active ? TextAttributes.BOLD | TextAttributes.INVERSE : TextAttributes.NONE
+            }
+          >
+            {`${active ? "› " : "  "}${label}`}
+          </text>
         );
       })}
-    </Box>
+    </box>
   );
 }
 

@@ -1,5 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Box, useApp, useInput, useWindowSize } from "ink";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createCliRenderer,
+  type ScrollBoxRenderable,
+} from "@opentui/core";
+import {
+  createRoot,
+  useKeyboard,
+  useRenderer,
+  useTerminalDimensions,
+} from "@opentui/react";
 import type { ModelMessage } from "ai";
 import { compactMessages } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
@@ -17,6 +26,7 @@ import { Timeline } from "./Timeline.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
 import { usePromptInput } from "./usePromptInput.ts";
+import { keyChar } from "./keys.ts";
 
 interface Props {
   config: AnvilConfig;
@@ -27,8 +37,9 @@ interface Props {
 }
 
 export function App({ config: initialConfig, cwd, session, yes, initialPrompt }: Props) {
-  const { exit, suspendTerminal } = useApp();
-  const { rows, columns } = useWindowSize();
+  const renderer = useRenderer();
+  const { width: columns, height: rows } = useTerminalDimensions();
+  const scrollRef = useRef<ScrollBoxRenderable>(null);
   const [config, setConfig] = useState(initialConfig);
   const configRef = useRef(config);
   configRef.current = config;
@@ -36,8 +47,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [status, setStatus] = useState("starting…");
   const [serverReady, setServerReady] = useState(false);
-  const [historyOffset, setHistoryOffset] = useState(0);
-  const [mode, setMode] = useState(config.mode);
+  const [browsingHistory, setBrowsingHistory] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
@@ -54,6 +64,33 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const streamingAccRef = useRef("");
   const toolInputsRef = useRef(new Map<string, unknown>());
 
+  const exit = useCallback(() => {
+    renderer.destroy();
+  }, [renderer]);
+
+  const suspendTerminal = useCallback(
+    async (fn: () => Promise<void>) => {
+      renderer.suspend();
+      try {
+        await fn();
+      } finally {
+        renderer.resume();
+      }
+    },
+    [renderer],
+  );
+
+  const refreshBrowseState = useCallback(() => {
+    const sb = scrollRef.current;
+    if (!sb) {
+      setBrowsingHistory(false);
+      return;
+    }
+    const view = sb.viewport.height;
+    const atBottom = sb.scrollTop + view >= sb.scrollHeight - 1;
+    setBrowsingHistory(!atBottom);
+  }, []);
+
   const recordTimeline = useCallback(
     (item: TimelineItem) => {
       if (item.kind === "status" || item.kind === "thinking") return;
@@ -62,13 +99,15 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     [session],
   );
 
-  const push = useCallback((item: TimelineItem, persist = true) => {
-    setItems((prev) => [...prev, item]);
-    setHistoryOffset(0);
-    if (persist) recordTimeline(item);
-  }, [recordTimeline]);
+  const push = useCallback(
+    (item: TimelineItem, persist = true) => {
+      setItems((prev) => [...prev, item]);
+      setBrowsingHistory(false);
+      if (persist) recordTimeline(item);
+    },
+    [recordTimeline],
+  );
 
-  /** Commit live thinking/assistant text into permanent timeline items (in order). */
   const flushLive = useCallback(() => {
     const thinkingText = thinkingAccRef.current.trim();
     if (thinkingText) {
@@ -85,9 +124,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   }, [push]);
 
   const upsertTool = useCallback((item: Extract<TimelineItem, { kind: "tool" }>) => {
-      setItems((prev) => {
+    setItems((prev) => {
       const idx = prev.findIndex((x) => x.kind === "tool" && x.id === item.id);
-        if (idx === -1) return [...prev, item];
+      if (idx === -1) return [...prev, item];
       const next = prev.slice();
       next[idx] = item;
       return next;
@@ -109,7 +148,6 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         Object.assign(initialConfig, updated);
         return updated;
       });
-      setMode(next);
       if (serverReady) refreshStatus({ ...configRef.current, mode: next }, next);
       push({ kind: "status", id: nextId("s"), text: `mode → ${next}` });
     },
@@ -192,11 +230,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       }
 
       if (!serverReady) {
-        push({
-          kind: "error",
-          id: nextId("e"),
-          text: "Model server is offline. Enter /retry after it is available.",
-        }, false);
+        push(
+          {
+            kind: "error",
+            id: nextId("e"),
+            text: "Model server is offline. Enter /retry after it is available.",
+          },
+          false,
+        );
         return;
       }
 
@@ -268,7 +309,6 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         for (const m of added) await session.appendMessage(m);
         messagesRef.current = result.messages;
         flushLive();
-        // Sparse chunk streams: commit final text if nothing was streamed live.
         if (!streamedAny && result.text?.trim()) {
           push({ kind: "assistant", id: nextId("a"), text: result.text });
         }
@@ -285,7 +325,20 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         abortRef.current = null;
       }
     },
-    [applyMode, askPermission, busy, checkConnection, cwd, exit, flushLive, push, recordTimeline, serverReady, session, upsertTool],
+    [
+      applyMode,
+      askPermission,
+      busy,
+      checkConnection,
+      cwd,
+      exit,
+      flushLive,
+      push,
+      recordTimeline,
+      serverReady,
+      session,
+      upsertTool,
+    ],
   );
 
   const prompt = usePromptInput({
@@ -332,8 +385,6 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
   const pasteExtra = prompt.pasteHint ? 1 : 0;
   const pickerExtra = prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0;
-  // Active work stays inside
-  // the transcript, so it remains readable through the normal scroller.
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80)
     : inputContentRows(prompt.buffer.value, columns || 80) + vimExtra + pasteExtra;
@@ -343,54 +394,59 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     editorMode: config.ui.editorMode,
     vimMode: prompt.vimMode,
     showConfig,
-    browsingHistory: historyOffset > 0,
+    browsingHistory,
     filePicker: Boolean(prompt.filePicker),
   };
-  const chrome = headerHeight(status, columns || 80) + inputRows + footerHeight(footerState, columns || 80);
+  const chrome =
+    headerHeight(status, columns || 80) + inputRows + footerHeight(footerState, columns || 80);
   const timelineLines = Math.max(3, (rows || 24) - chrome);
 
-  useInput((ch, key) => {
-    if (pendingPermission && ch === "a") {
-      pendingPermission.resolve("allow");
-      setPendingPermission(null);
-    } else if (pendingPermission && ch === "A") {
-      pendingPermission.resolve("always");
-      setPendingPermission(null);
-    } else if (pendingPermission && (ch === "d" || ch === "n")) {
-      pendingPermission.resolve("deny");
-      setPendingPermission(null);
-    } else if (!pendingPermission && !showConfig && key.pageUp) {
-      setHistoryOffset((offset) =>
-        offset + Math.max(1, Math.floor(timelineLines * 0.8)),
-      );
-    } else if (!pendingPermission && !showConfig && key.pageDown) {
-      setHistoryOffset((offset) =>
-        Math.max(0, offset - Math.max(1, Math.floor(timelineLines * 0.8))),
-      );
+  useKeyboard((key) => {
+    if (pendingPermission) {
+      const ch = keyChar(key);
+      if (ch === "a") {
+        pendingPermission.resolve("allow");
+        setPendingPermission(null);
+      } else if (ch === "A") {
+        pendingPermission.resolve("always");
+        setPendingPermission(null);
+      } else if (ch === "d" || ch === "n") {
+        pendingPermission.resolve("deny");
+        setPendingPermission(null);
+      }
+      return;
+    }
+    if (showConfig) return;
+
+    if (key.name === "pageup") {
+      const step = Math.max(1, Math.floor(timelineLines * 0.8));
+      scrollRef.current?.scrollBy(-step);
+      refreshBrowseState();
+    } else if (key.name === "pagedown") {
+      const step = Math.max(1, Math.floor(timelineLines * 0.8));
+      scrollRef.current?.scrollBy(step);
+      refreshBrowseState();
     }
   });
 
   return (
-    <Box flexDirection="column" width="100%" height={rows || undefined}>
+    <box flexDirection="column" width="100%" height={rows || undefined}>
       <Header status={status} columns={columns || 80} />
-      <Box flexGrow={1} flexDirection="column" overflow="hidden">
+      <box flexGrow={1} flexDirection="column" height={timelineLines}>
         <Timeline
           items={items}
-          maxLines={timelineLines}
           columns={columns || 80}
           thinking={thinking}
           streaming={streaming}
-          scrollOffset={historyOffset}
+          scrollRef={scrollRef}
         />
-      </Box>
+      </box>
       {showConfig ? (
         <ConfigPanel
           config={config}
           onChange={(next) => {
             setConfig(next);
-            // keep mutable reference used by agent loop in sync
             Object.assign(initialConfig, next);
-            setMode(next.mode);
             void checkConnection(next);
           }}
           onClose={() => setShowConfig(false)}
@@ -433,11 +489,11 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         editorMode={config.ui.editorMode}
         vimMode={prompt.vimMode}
         showConfig={showConfig}
-        browsingHistory={historyOffset > 0}
+        browsingHistory={browsingHistory}
         filePicker={Boolean(prompt.filePicker)}
         columns={columns || 80}
       />
-    </Box>
+    </box>
   );
 }
 
@@ -448,16 +504,27 @@ export async function runTui(opts: {
   yes?: boolean;
   prompt?: string;
 }): Promise<void> {
-  const { render } = await import("ink");
-  const instance = render(
-    React.createElement(App, {
-      config: opts.config,
-      cwd: opts.cwd,
-      session: opts.session,
-      yes: opts.yes,
-      initialPrompt: opts.prompt,
-    }),
-    { alternateScreen: true, exitOnCtrlC: true },
-  );
-  await instance.waitUntilExit();
+  const { createElement } = await import("react");
+  await new Promise<void>(async (resolve, reject) => {
+    try {
+      const renderer = await createCliRenderer({
+        screenMode: "alternate-screen",
+        exitOnCtrlC: true,
+        useMouse: true,
+        onDestroy: () => resolve(),
+      });
+      const root = createRoot(renderer);
+      root.render(
+        createElement(App, {
+          config: opts.config,
+          cwd: opts.cwd,
+          session: opts.session,
+          yes: opts.yes,
+          initialPrompt: opts.prompt,
+        }),
+      );
+    } catch (err) {
+      reject(err);
+    }
+  });
 }

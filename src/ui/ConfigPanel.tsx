@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { useState } from "react";
+import { TextAttributes, type KeyEvent } from "@opentui/core";
+import { useKeyboard } from "@opentui/react";
 import type { AgentMode, AnvilConfig, EditorMode } from "../config/types.ts";
 import {
   globalConfigPath,
@@ -7,6 +8,8 @@ import {
   setAtPath,
   writeJsonObject,
 } from "../config/cli.ts";
+import { keyChar } from "./keys.ts";
+import { colors } from "./theme.ts";
 
 export type ConfigField =
   | "model"
@@ -106,7 +109,6 @@ export function ConfigPanel({
         break;
     }
     if (field === "editor" && value === "") {
-      // clear override
       const ui = (obj.ui as Record<string, unknown> | undefined) ?? {};
       delete ui.editor;
       obj.ui = ui;
@@ -132,7 +134,7 @@ export function ConfigPanel({
   const commitEdit = async () => {
     const field = FIELDS[selected]!;
     const raw = draft.trim();
-    let next = { ...config, ui: { ...config.ui } };
+    const next = { ...config, ui: { ...config.ui } };
     if (field.id === "model") next.model = raw || config.model;
     else if (field.id === "baseURL") next.baseURL = raw || config.baseURL;
     else if (field.id === "editor") {
@@ -156,37 +158,38 @@ export function ConfigPanel({
     await persist(next, field.id);
   };
 
-  useInput((ch, key) => {
+  useKeyboard((key: KeyEvent) => {
     if (editing) {
-      if (key.escape) {
+      if (key.name === "escape") {
         setEditing(false);
         return;
       }
-      if (key.return) {
+      if (key.name === "return") {
         void commitEdit();
         return;
       }
-      if (key.backspace || key.delete) {
+      if (key.name === "backspace" || key.name === "delete") {
         setDraft((d) => d.slice(0, -1));
         return;
       }
-      if (ch && !key.ctrl && !key.meta) setDraft((d) => d + ch);
+      const ch = keyChar(key);
+      if (ch) setDraft((d) => d + ch);
       return;
     }
 
-    if (key.escape) {
+    if (key.name === "escape") {
       onClose();
       return;
     }
-    if (key.upArrow) {
+    if (key.name === "up") {
       setSelected((s) => (s <= 0 ? FIELDS.length - 1 : s - 1));
       return;
     }
-    if (key.downArrow) {
+    if (key.name === "down") {
       setSelected((s) => (s + 1) % FIELDS.length);
       return;
     }
-    if (key.return) {
+    if (key.name === "return") {
       const field = FIELDS[selected]!;
       if (field.kind === "toggle") {
         void applyToggle(field.id);
@@ -198,49 +201,61 @@ export function ConfigPanel({
       setEditing(true);
       return;
     }
-    if (ch === "r") {
+    if (keyChar(key) === "r") {
       onRetryConnection?.();
     }
   });
 
   return (
-    <Box
+    <box
       flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
+      border
+      borderStyle="rounded"
+      borderColor={colors.cyan}
       paddingX={1}
       width="100%"
       flexShrink={0}
     >
-      <Text bold color="cyan">
+      <text fg={colors.cyan} attributes={TextAttributes.BOLD}>
         /config
-      </Text>
-      <Text dimColor>↑/↓ select · Enter edit/toggle · Esc close · saves to ~/.anvil/config.json</Text>
-      <Text dimColor>
-        Server: {connectionStatus ?? "unknown"} · API key: {config.apiKey ? "configured" : "missing"} · MCP: {Object.keys(config.mcpServers).length} configured · r retry
-      </Text>
-      <Box flexDirection="column" marginTop={1}>
+      </text>
+      <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        ↑/↓ select · Enter edit/toggle · Esc close · saves to ~/.anvil/config.json
+      </text>
+      <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        {`Server: ${connectionStatus ?? "unknown"} · API key: ${config.apiKey ? "configured" : "missing"} · MCP: ${Object.keys(config.mcpServers).length} configured · r retry`}
+      </text>
+      <box flexDirection="column" marginTop={1}>
         {FIELDS.map((f, i) => {
           const active = i === selected;
           const val = displayValue(config, f.id);
           return (
-            <Box key={f.id}>
-              <Text color={active ? "green" : undefined} inverse={active && !editing}>
-                {active ? "› " : "  "}
-                {f.label.padEnd(16)}
-              </Text>
+            <box key={f.id} flexDirection="row">
+              <text
+                fg={active ? colors.green : colors.text}
+                attributes={active && !editing ? TextAttributes.INVERSE : TextAttributes.NONE}
+              >
+                {`${active ? "› " : "  "}${f.label.padEnd(16)}`}
+              </text>
               {editing && active ? (
-                <Text color="yellow">
+                <text fg={colors.yellow}>
                   {draft}
-                  <Text dimColor>█</Text>
-                </Text>
+                  <span fg={colors.muted} attributes={TextAttributes.DIM}>
+                    █
+                  </span>
+                </text>
               ) : (
-                <Text dimColor={!active}>{val}</Text>
+                <text
+                  fg={active ? colors.text : colors.muted}
+                  attributes={active ? TextAttributes.NONE : TextAttributes.DIM}
+                >
+                  {val}
+                </text>
               )}
-            </Box>
+            </box>
           );
         })}
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 }

@@ -1,6 +1,10 @@
-import React from "react";
-import { Box, Text } from "ink";
+import { useMemo, type Ref } from "react";
+import {
+  TextAttributes,
+  type ScrollBoxRenderable,
+} from "@opentui/core";
 import { formatToolDuration, formatToolInput, wrapDisplayLines } from "./format.ts";
+import { colors, getMarkdownSyntaxStyle } from "./theme.ts";
 import type { TimelineItem } from "./types.ts";
 
 type Tone =
@@ -19,15 +23,15 @@ interface DisplayLine {
   tone: Tone;
 }
 
-const COLORS: Record<Tone, string | undefined> = {
-  user: "cyan",
-  assistant: undefined,
-  thinking: "gray",
-  "tool-running": "yellow",
-  "tool-done": "green",
-  "tool-error": "red",
-  status: "gray",
-  error: "red",
+const TONE_FG: Record<Tone, string | undefined> = {
+  user: colors.cyan,
+  assistant: colors.text,
+  thinking: colors.gray,
+  "tool-running": colors.yellow,
+  "tool-done": colors.green,
+  "tool-error": colors.red,
+  status: colors.gray,
+  error: colors.red,
 };
 
 function appendWrapped(
@@ -48,12 +52,14 @@ function appendTool(
   item: Extract<TimelineItem, { kind: "tool" }>,
   width: number,
 ): void {
-  const tone: Tone = item.status === "running"
-    ? "tool-running"
-    : item.status === "done"
-      ? "tool-done"
-      : "tool-error";
-  const state = item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
+  const tone: Tone =
+    item.status === "running"
+      ? "tool-running"
+      : item.status === "done"
+        ? "tool-done"
+        : "tool-error";
+  const state =
+    item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
   const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
   const duration = formatToolDuration(item.ms);
   appendWrapped(
@@ -110,8 +116,6 @@ export function buildTranscriptLines(
   thinking?: string,
   streaming?: string,
 ): DisplayLine[] {
-  // Four columns are reserved for the card rail. Individual rows are split
-  // before Ink sees them, preventing long paths and file lines from overflow.
   const width = Math.max(12, columns - 4);
   const lines: DisplayLine[] = [];
   for (const item of items) appendItem(lines, item, width);
@@ -120,44 +124,194 @@ export function buildTranscriptLines(
   return lines;
 }
 
+function PlainBlock({
+  title,
+  body,
+  tone,
+  width,
+}: {
+  title: string;
+  body: string;
+  tone: Tone;
+  width: number;
+}) {
+  const fg = TONE_FG[tone];
+  const dim =
+    tone === "thinking" || tone === "status"
+      ? TextAttributes.DIM | (tone === "thinking" ? TextAttributes.ITALIC : 0)
+      : TextAttributes.NONE;
+  const wrapped = wrapDisplayLines(body, width);
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={fg} attributes={dim}>
+        {title}
+      </text>
+      {wrapped.map((line, index) => (
+        <text key={index} fg={fg} attributes={dim}>
+          {`│  ${line || " "}`}
+        </text>
+      ))}
+      <text fg={fg} attributes={dim}>
+        ╰─
+      </text>
+    </box>
+  );
+}
+
+function ToolBlock({
+  item,
+  width,
+}: {
+  item: Extract<TimelineItem, { kind: "tool" }>;
+  width: number;
+}) {
+  const tone: Tone =
+    item.status === "running"
+      ? "tool-running"
+      : item.status === "done"
+        ? "tool-done"
+        : "tool-error";
+  const fg = TONE_FG[tone];
+  const state =
+    item.status === "running" ? "running" : item.status === "done" ? "complete" : "failed";
+  const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
+  const duration = formatToolDuration(item.ms);
+  const title = `╭─ ${icon} ${item.name} · ${state}${duration ? ` · ${duration}` : ""}`;
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text fg={fg}>{title}</text>
+      <text fg={colors.gray} attributes={TextAttributes.DIM}>
+        │  input
+      </text>
+      {wrapDisplayLines(formatToolInput(item.input), width).map((line, index) => (
+        <text key={`in-${index}`} fg={colors.gray} attributes={TextAttributes.DIM}>
+          {`│  ${line || " "}`}
+        </text>
+      ))}
+      {item.output != null ? (
+        <>
+          <text fg={colors.gray} attributes={TextAttributes.DIM}>
+            │  output
+          </text>
+          {wrapDisplayLines(item.output, width).map((line, index) => (
+            <text key={`out-${index}`} fg={fg}>
+              {`│  ${line || " "}`}
+            </text>
+          ))}
+        </>
+      ) : null}
+      <text fg={fg}>╰─</text>
+    </box>
+  );
+}
+
+function AssistantMarkdown({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming?: boolean;
+}) {
+  const syntaxStyle = useMemo(() => getMarkdownSyntaxStyle(), []);
+  return (
+    <box flexDirection="column" width="100%" flexShrink={0}>
+      <text>╭─ ✦ anvil</text>
+      <box paddingLeft={2} width="100%">
+        <markdown
+          content={text}
+          syntaxStyle={syntaxStyle}
+          conceal
+          streaming={Boolean(streaming)}
+          width="100%"
+        />
+      </box>
+      <text>╰─</text>
+    </box>
+  );
+}
+
+function TimelineItemView({
+  item,
+  width,
+}: {
+  item: TimelineItem;
+  width: number;
+}) {
+  switch (item.kind) {
+    case "user":
+      return <PlainBlock title="╭─ you" body={item.text} tone="user" width={width} />;
+    case "assistant":
+      return <AssistantMarkdown text={item.text} />;
+    case "thinking":
+      return <PlainBlock title="╭─ thinking" body={item.text} tone="thinking" width={width} />;
+    case "tool":
+      return <ToolBlock item={item} width={width} />;
+    case "status":
+      return (
+        <box flexDirection="column" width="100%" flexShrink={0}>
+          {wrapDisplayLines(`· ${item.text}`, width).map((line, index) => (
+            <text key={index} fg={colors.gray} attributes={TextAttributes.DIM}>
+              {`  ${line}`}
+            </text>
+          ))}
+        </box>
+      );
+    case "error":
+      return <PlainBlock title="╭─ ✕ error" body={item.text} tone="error" width={width} />;
+  }
+}
+
 export function Timeline({
   items,
-  maxLines,
   columns,
   thinking,
   streaming,
-  scrollOffset = 0,
+  scrollRef,
 }: {
   items: TimelineItem[];
-  maxLines: number;
   columns: number;
   thinking?: string;
   streaming?: string;
-  /** Number of rendered transcript rows above the live tail. */
-  scrollOffset?: number;
+  scrollRef?: Ref<ScrollBoxRenderable>;
 }) {
-  const lines = buildTranscriptLines(items, columns, thinking, streaming);
-  const end = Math.max(0, lines.length - scrollOffset);
-  const visible = lines.slice(Math.max(0, end - Math.max(maxLines, 1)), end);
+  const width = Math.max(12, columns - 4);
   return (
-    <Box
-      flexDirection="column"
-      height={Math.max(maxLines, 1)}
-      overflow="hidden"
-      justifyContent="flex-end"
+    <scrollbox
+      ref={scrollRef}
       flexGrow={1}
+      width="100%"
+      stickyScroll
+      stickyStart="bottom"
+      scrollX={false}
+      scrollY
+      style={{
+        rootOptions: { flexGrow: 1, width: "100%" },
+        wrapperOptions: { flexGrow: 1 },
+        viewportOptions: { flexGrow: 1 },
+        contentOptions: { flexDirection: "column", width: "100%", gap: 0 },
+        scrollbarOptions: {
+          trackOptions: {
+            foregroundColor: colors.magenta,
+            backgroundColor: colors.muted,
+          },
+        },
+      }}
     >
-      {visible.map((line) => (
-        <Box key={line.key} flexShrink={0}>
-          <Text
-            color={COLORS[line.tone]}
-            dimColor={line.tone === "thinking" || line.tone === "status"}
-            italic={line.tone === "thinking"}
-          >
-            {line.text}
-          </Text>
-        </Box>
+      {items.map((item) => (
+        <TimelineItemView key={item.id} item={item} width={width} />
       ))}
-    </Box>
+      {thinking ? (
+        <PlainBlock
+          key="live-thinking"
+          title="╭─ thinking"
+          body={thinking}
+          tone="thinking"
+          width={width}
+        />
+      ) : null}
+      {streaming ? (
+        <AssistantMarkdown key="live-response" text={streaming} streaming />
+      ) : null}
+    </scrollbox>
   );
 }
