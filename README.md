@@ -60,19 +60,27 @@ Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal 
 |-----|--------|
 | Enter | Send message |
 | Ctrl+J / Shift+Enter | Insert newline |
-| Esc | Interrupt turn (while busy) or clear input |
+| Arrow keys / Home / End | Move cursor in the prompt |
+| Ctrl+A / Ctrl+E | Line start / end |
+| Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
+| Esc | Interrupt (busy); in Vim insert → normal; otherwise clear input |
 | Shift+Tab | Toggle plan ↔ build |
 | a / A / d | Allow / always allow / deny tool permission |
+| `/config` | Interactive settings panel (model, editor mode, …) |
 
-Paste into the prompt is supported (including multiline).
+Paste inserts at the cursor (bracketed paste). Large pastes show a short status notice.
+
+**Vim mode** (`ui.editorMode: "vim"` via `/config` or `anvil config set ui.editorMode vim`): Esc enters normal mode (`hjkl`, `i`/`a`/`I`/`A`, `x`, `dd`, `w`/`b`, `o`/`O`).
 
 ## Config
 
-Prefer the CLI (writes `~/.anvil/config.json` by default):
+Prefer the TUI `/config` panel or the CLI (writes `~/.anvil/config.json` by default):
 
 ```bash
 anvil config                          # effective values + which file won
 anvil config set model qwen/qwen3.6-27b
+anvil config set ui.editorMode vim
+anvil config set ui.editor nvim
 anvil config set contextLength 65536
 anvil config unset model --project    # stop a repo from overriding global
 anvil config edit                     # open global config in $EDITOR
@@ -88,6 +96,10 @@ Example `~/.anvil/config.json`:
   "model": "qwen/qwen3.6-27b",
   "contextLength": 65536,
   "maxSteps": 40,
+  "ui": {
+    "editorMode": "emacs",
+    "editor": "nvim"
+  },
   "skills": {
     "autoDetect": true,
     "always": [],

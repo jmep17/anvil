@@ -7,7 +7,7 @@ export function globalConfigPath(): string {
   return join(anvilHome(), "config.json");
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+export async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   const file = Bun.file(path);
   if (!(await file.exists())) return {};
   try {
@@ -117,6 +117,10 @@ export function coerceConfigValue(keyPath: string[], raw: string): unknown {
 
   if (leaf === "mode" && raw !== "plan" && raw !== "build") {
     throw new Error("mode must be plan or build");
+  }
+
+  if (leaf === "editorMode" && raw !== "emacs" && raw !== "vim") {
+    throw new Error("ui.editorMode must be emacs or vim");
   }
 
   return raw;

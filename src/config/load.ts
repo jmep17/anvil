@@ -4,10 +4,12 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_SKILLS_CONFIG,
+  DEFAULT_UI_CONFIG,
   type AnvilConfig,
   type ContextConfig,
   type McpServerConfig,
   type SkillsConfig,
+  type UiConfig,
 } from "./types.ts";
 
 export function anvilHome(): string {
@@ -65,9 +67,27 @@ function mergeContext(
   };
 }
 
+function mergeUi(base: UiConfig, partial: unknown): UiConfig {
+  if (!partial || typeof partial !== "object") return base;
+  const p = partial as Record<string, unknown>;
+  const next: UiConfig = { ...base };
+  if (p.editorMode === "emacs" || p.editorMode === "vim") next.editorMode = p.editorMode;
+  if (typeof p.editor === "string") {
+    next.editor = p.editor.trim() ? p.editor : undefined;
+  } else if ("editor" in p && (p.editor === null || p.editor === undefined)) {
+    delete next.editor;
+  }
+  return next;
+}
+
 function mergePartial(base: AnvilConfig, partial: Record<string, unknown> | null): AnvilConfig {
   if (!partial) return base;
-  const next = { ...base, skills: { ...base.skills }, context: { ...base.context } };
+  const next = {
+    ...base,
+    skills: { ...base.skills },
+    context: { ...base.context },
+    ui: { ...base.ui },
+  };
   if (typeof partial.baseURL === "string") next.baseURL = partial.baseURL;
   if (typeof partial.apiKey === "string") next.apiKey = partial.apiKey;
   if (typeof partial.model === "string") next.model = partial.model;
@@ -82,6 +102,7 @@ function mergePartial(base: AnvilConfig, partial: Record<string, unknown> | null
   }
   if ("skills" in partial) next.skills = mergeSkills(base.skills, partial.skills);
   if ("context" in partial) next.context = mergeContext(base.context, partial.context);
+  if ("ui" in partial) next.ui = mergeUi(base.ui, partial.ui);
   return next;
 }
 
@@ -93,6 +114,7 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
       ...DEFAULT_CONFIG,
       skills: { ...DEFAULT_SKILLS_CONFIG },
       context: { ...DEFAULT_CONTEXT_CONFIG },
+      ui: { ...DEFAULT_UI_CONFIG },
     },
     globalCfg,
   );
@@ -108,6 +130,7 @@ export async function loadConfig(cwd: string, overrides: Partial<AnvilConfig> = 
     context: overrides.context
       ? mergeContext(cfg.context, overrides.context)
       : cfg.context,
+    ui: overrides.ui ? mergeUi(cfg.ui, overrides.ui) : cfg.ui,
   };
 
   if (process.env.ANVIL_BASE_URL) cfg.baseURL = process.env.ANVIL_BASE_URL;

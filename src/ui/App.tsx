@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Box, useApp, useInput, usePaste, useWindowSize } from "ink";
+import { Box, useApp, useInput, useWindowSize } from "ink";
 import type { ModelMessage } from "ai";
 import { compactMessages } from "../agent/compact.ts";
 import { runAgent } from "../agent/loop.ts";
@@ -9,11 +9,13 @@ import { SessionStore } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
 import { allowAll } from "../tools/permissions.ts";
 import { Activity } from "./Activity.tsx";
+import { ConfigPanel } from "./ConfigPanel.tsx";
 import { Footer } from "./Footer.tsx";
 import { Header } from "./Header.tsx";
 import { InputBox } from "./InputBox.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { nextId, type TimelineItem } from "./types.ts";
+import { usePromptInput } from "./usePromptInput.ts";
 
 interface Props {
   config: AnvilConfig;
@@ -23,14 +25,17 @@ interface Props {
   initialPrompt?: string;
 }
 
-export function App({ config, cwd, session, yes, initialPrompt }: Props) {
-  const { exit } = useApp();
+export function App({ config: initialConfig, cwd, session, yes, initialPrompt }: Props) {
+  const { exit, suspendTerminal } = useApp();
   const { rows } = useWindowSize();
-  const [input, setInput] = useState("");
+  const [config, setConfig] = useState(initialConfig);
+  const configRef = useRef(config);
+  configRef.current = config;
   const [busy, setBusy] = useState(false);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [status, setStatus] = useState("starting…");
   const [mode, setMode] = useState(config.mode);
+  const [showConfig, setShowConfig] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
     detail: string;
@@ -57,19 +62,31 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
     });
   }, []);
 
+  const refreshStatus = useCallback(
+    (cfg: AnvilConfig, agentMode: AgentMode) => {
+      setStatus(`${cfg.model} · ${agentMode} · session ${session.id}`);
+    },
+    [session.id],
+  );
+
   const applyMode = useCallback(
     (next: AgentMode) => {
-      config.mode = next;
+      setConfig((c) => {
+        const updated = { ...c, mode: next };
+        configRef.current = updated;
+        Object.assign(initialConfig, updated);
+        return updated;
+      });
       setMode(next);
-      setStatus(`${config.model} · ${next} · session ${session.id}`);
+      refreshStatus({ ...configRef.current, mode: next }, next);
       push({ kind: "status", id: nextId("s"), text: `mode → ${next}` });
     },
-    [config, push, session.id],
+    [initialConfig, push, refreshStatus],
   );
 
   const toggleMode = useCallback(() => {
-    applyMode(config.mode === "plan" ? "build" : "plan");
-  }, [applyMode, config]);
+    applyMode(configRef.current.mode === "plan" ? "build" : "plan");
+  }, [applyMode]);
 
   const askPermission = useCallback(
     (toolName: string, detail: string) => {
@@ -88,6 +105,10 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
         exit();
         return;
       }
+      if (text === "/config") {
+        setShowConfig(true);
+        return;
+      }
       if (text.startsWith("/mode ")) {
         const m = text.slice(6).trim();
         if (m === "plan" || m === "build") {
@@ -96,7 +117,11 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
         return;
       }
       if (text === "/compact") {
-        const next = compactMessages(messagesRef.current, config.contextLength, 8);
+        const next = compactMessages(
+          messagesRef.current,
+          configRef.current.contextLength,
+          8,
+        );
         messagesRef.current = next;
         push({
           kind: "status",
@@ -162,7 +187,7 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
 
       try {
         const result = await runAgent({
-          config,
+          config: configRef.current,
           cwd,
           messages: nextMessages,
           askPermission,
@@ -197,8 +222,21 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
         abortRef.current = null;
       }
     },
-    [applyMode, askPermission, busy, config, cwd, exit, push, session, upsertTool],
+    [applyMode, askPermission, busy, cwd, exit, push, session, upsertTool],
   );
+
+  const prompt = usePromptInput({
+    busy,
+    blocked: Boolean(pendingPermission) || showConfig,
+    editorMode: config.ui.editorMode,
+    editor: config.ui.editor,
+    suspendTerminal,
+    onSubmit: (text) => void submit(text),
+    onAbort: () => abortRef.current?.abort(),
+    onToggleAgentMode: toggleMode,
+    onPasteNotice: (msg) => push({ kind: "status", id: nextId("s"), text: msg }),
+    isActive: !showConfig && !pendingPermission,
+  });
 
   useEffect(() => {
     (async () => {
@@ -208,7 +246,7 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
         push({ kind: "error", id: nextId("e"), text: `Cannot reach ${config.baseURL}` });
         return;
       }
-      setStatus(`${config.model} · ${mode} · session ${session.id}`);
+      refreshStatus(config, mode);
       const loaded = await session.loadMessages();
       messagesRef.current = loaded;
       if (initialPrompt && !startedRef.current) {
@@ -216,80 +254,24 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
         void submit(initialPrompt);
       }
     })();
-  }, [config, initialPrompt, mode, push, session, submit]);
-
-  usePaste(
-    (text) => {
-      if (busy || pendingPermission) return;
-      setInput((v) => v + text);
-    },
-    { isActive: !busy && !pendingPermission },
-  );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once on mount
+  }, []);
 
   useInput((ch, key) => {
-    if (pendingPermission) {
-      if (ch === "a") {
-        pendingPermission.resolve("allow");
-        setPendingPermission(null);
-      } else if (ch === "A") {
-        pendingPermission.resolve("always");
-        setPendingPermission(null);
-      } else if (ch === "d" || ch === "n") {
-        pendingPermission.resolve("deny");
-        setPendingPermission(null);
-      }
-      return;
-    }
-
-    if (key.escape) {
-      if (busy && abortRef.current) {
-        abortRef.current.abort();
-        return;
-      }
-      if (!busy && input) {
-        setInput("");
-      }
-      return;
-    }
-
-    if (busy) return;
-
-    if (key.shift && key.tab) {
-      toggleMode();
-      return;
-    }
-
-    // Ctrl+J → newline
-    if (key.ctrl && (ch === "j" || ch === "\n" || ch === "\r")) {
-      setInput((v) => v + "\n");
-      return;
-    }
-
-    // Shift+Enter → newline when terminal reports it
-    if (key.return && key.shift) {
-      setInput((v) => v + "\n");
-      return;
-    }
-
-    if (key.return) {
-      const value = input;
-      setInput("");
-      void submit(value);
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInput((v) => v.slice(0, -1));
-      return;
-    }
-
-    if (ch && !key.ctrl && !key.meta) {
-      setInput((v) => v + ch);
+    if (!pendingPermission) return;
+    if (ch === "a") {
+      pendingPermission.resolve("allow");
+      setPendingPermission(null);
+    } else if (ch === "A") {
+      pendingPermission.resolve("always");
+      setPendingPermission(null);
+    } else if (ch === "d" || ch === "n") {
+      pendingPermission.resolve("deny");
+      setPendingPermission(null);
     }
   });
 
-  // Layout budget: header(~3) + footer(1) + input(~3+) + activity(~0-4) + margins
-  const inputLines = Math.max(1, input.split("\n").length);
+  const inputLines = Math.max(1, prompt.buffer.value.split("\n").length);
   const activityBudget =
     (busy ? 1 : 0) +
     (thinking ? 1 : 0) +
@@ -302,8 +284,6 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
     (i): i is Extract<TimelineItem, { kind: "tool" }> =>
       i.kind === "tool" && i.status === "running",
   );
-
-  // Completed tools stay in timeline; hide running ones from timeline (shown in Activity)
   const timelineItems = items.filter(
     (i) => !(i.kind === "tool" && i.status === "running"),
   );
@@ -320,16 +300,40 @@ export function App({ config, cwd, session, yes, initialPrompt }: Props) {
           runningTools={runningTools}
         />
       </Box>
-      <InputBox
-        value={input}
+      {showConfig ? (
+        <ConfigPanel
+          config={config}
+          onChange={(next) => {
+            setConfig(next);
+            // keep mutable reference used by agent loop in sync
+            Object.assign(initialConfig, next);
+            setMode(next.mode);
+            refreshStatus(next, next.mode);
+          }}
+          onClose={() => setShowConfig(false)}
+          onStatus={(msg) => push({ kind: "status", id: nextId("s"), text: msg })}
+        />
+      ) : (
+        <InputBox
+          value={prompt.buffer.value}
+          cursor={prompt.buffer.cursor}
+          busy={busy}
+          vimMode={prompt.vimMode}
+          editorMode={config.ui.editorMode}
+          pasteHint={prompt.pasteHint}
+          pending={
+            pendingPermission
+              ? { toolName: pendingPermission.toolName, detail: pendingPermission.detail }
+              : null
+          }
+        />
+      )}
+      <Footer
         busy={busy}
-        pending={
-          pendingPermission
-            ? { toolName: pendingPermission.toolName, detail: pendingPermission.detail }
-            : null
-        }
+        editorMode={config.ui.editorMode}
+        vimMode={prompt.vimMode}
+        showConfig={showConfig}
       />
-      <Footer busy={busy} />
     </Box>
   );
 }

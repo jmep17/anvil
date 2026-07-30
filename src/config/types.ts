@@ -33,6 +33,15 @@ export interface ContextConfig {
   maxChars: number;
 }
 
+export type EditorMode = "emacs" | "vim";
+
+export interface UiConfig {
+  /** Input editing style. Default emacs. */
+  editorMode: EditorMode;
+  /** Override for external editor ($VISUAL / $EDITOR fallback). */
+  editor?: string;
+}
+
 export interface AnvilConfig {
   baseURL: string;
   apiKey: string;
@@ -43,6 +52,7 @@ export interface AnvilConfig {
   mcpServers: Record<string, McpServerConfig>;
   skills: SkillsConfig;
   context: ContextConfig;
+  ui: UiConfig;
 }
 
 export const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
@@ -60,6 +70,10 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
   maxChars: 6000,
 };
 
+export const DEFAULT_UI_CONFIG: UiConfig = {
+  editorMode: "emacs",
+};
+
 export const DEFAULT_CONFIG: AnvilConfig = {
   baseURL: "http://localhost:1234/v1",
   apiKey: "lmstudio",
@@ -70,4 +84,5 @@ export const DEFAULT_CONFIG: AnvilConfig = {
   mcpServers: {},
   skills: { ...DEFAULT_SKILLS_CONFIG },
   context: { ...DEFAULT_CONTEXT_CONFIG },
+  ui: { ...DEFAULT_UI_CONFIG },
 };

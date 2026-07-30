@@ -59,7 +59,7 @@ export async function runRepl(opts: {
   console.log(`anvil · ${opts.config.model} · ${opts.cwd}`);
   console.log(`server ok (${probe.detail})`);
   console.log(`session ${opts.session.id} · mode ${opts.config.mode}`);
-  console.log("Commands: /exit /mode plan|build /compact /help\n");
+  console.log("Commands: /exit /mode plan|build /compact /config /help\n");
 
   let messages: ModelMessage[] = await opts.session.loadMessages();
   const ask = opts.yes ? allowAll : askPermissionCli;
@@ -117,7 +117,12 @@ export async function runRepl(opts: {
       if (!line) continue;
       if (line === "/exit" || line === "/quit") break;
       if (line === "/help") {
-        console.log("/exit  /mode plan|build  /compact  /help");
+        console.log("/exit  /mode plan|build  /compact  /config  /help");
+        continue;
+      }
+      if (line === "/config") {
+        console.log("Interactive /config is available in the TUI (`anvil` or `anvil --tui`).");
+        console.log("Or use: anvil config set <key> <value>");
         continue;
       }
       if (line.startsWith("/mode ")) {
