@@ -2,7 +2,17 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { tool } from "ai";
 import { z } from "zod";
-import { requirePermission, resolvePath, type ToolContext } from "./types.ts";
+import {
+  requirePermission,
+  resolveProjectMutationPath,
+  type ToolContext,
+} from "./types.ts";
+
+function contentPreview(content: string): string {
+  const text = content.replace(/\r/g, "");
+  const excerpt = text.length > 240 ? `${text.slice(0, 239)}…` : text;
+  return `New content (${content.length} bytes): ${excerpt.replace(/\n/g, " ↵ ")}`;
+}
 
 export function createWriteTool(ctx: ToolContext) {
   return tool({
@@ -13,11 +23,18 @@ export function createWriteTool(ctx: ToolContext) {
       content: z.string().describe("Full file contents"),
     }),
     execute: async ({ path, content }) => {
-      const abs = resolvePath(ctx.cwd, path);
       if (ctx.mode === "plan") {
         return "Error: Write is disabled in plan mode. Switch to build mode to modify files.";
       }
-      const ok = await requirePermission(ctx, "Write", abs);
+      const abs = await resolveProjectMutationPath(ctx.cwd, path);
+      if (!abs) return `Error: Write target must remain inside the project: ${path}`;
+      const ok = await requirePermission(
+        ctx,
+        "Write",
+        abs,
+        contentPreview(content),
+        `${abs}\0${content}`,
+      );
       if (!ok) return "Error: permission denied for Write";
       await mkdir(dirname(abs), { recursive: true });
       await Bun.write(abs, content);

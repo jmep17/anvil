@@ -64,11 +64,18 @@ Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal 
 | Ctrl+A / Ctrl+E | Line start / end |
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
 | Esc | Interrupt (busy); in Vim insert → normal; otherwise clear input |
+| PgUp / PgDn | Browse the full transcript; PgDn returns to live output |
 | Shift+Tab | Toggle plan ↔ build |
-| a / A / d | Allow / always allow / deny tool permission |
+| a / A / d | Allow once / allow the exact same action for this session / deny |
 | `/config` | Interactive settings panel (model, editor mode, …) |
+| `/retry` | Recheck the configured model server after an offline error |
 
 Paste inserts at the cursor (bracketed paste). Large pastes show a short status notice.
+
+Write and Edit actions are restricted to the project directory by default, including
+symlink-aware checks. Approval prompts show a compact content/diff preview before
+the action runs. Resumed TUI sessions restore their visual transcript when it is
+available; older sessions still retain their model conversation context.
 
 **Vim mode** (`ui.editorMode: "vim"` via `/config` or `anvil config set ui.editorMode vim`): Esc enters normal mode (`hjkl`, `i`/`a`/`I`/`A`, `x`, `dd`, `w`/`b`, `o`/`O`).
 

@@ -21,4 +21,21 @@ describe("compactMessages", () => {
     expect(estimateTokens(next)).toBeLessThan(estimateTokens(messages));
     expect(JSON.stringify(next)).toContain("Context compacted");
   });
+
+  test("retains recent omitted user requests in the checkpoint", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "first task" },
+      { role: "assistant", content: "ack" },
+      { role: "user", content: "Preserve the migration decision" },
+      { role: "assistant", content: "x".repeat(5000) },
+      { role: "user", content: "Keep the error message concise" },
+      { role: "assistant", content: "x".repeat(5000) },
+      { role: "user", content: "Most recent request" },
+      { role: "assistant", content: "latest answer" },
+    ];
+    const next = compactMessages(messages, 2000, 2);
+    const checkpoint = next[2];
+    expect(JSON.stringify(checkpoint)).toContain("Preserve the migration decision");
+    expect(JSON.stringify(checkpoint)).toContain("Keep the error message concise");
+  });
 });

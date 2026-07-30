@@ -18,6 +18,30 @@ export function estimateTokens(messages: ModelMessage[]): number {
   return Math.ceil(chars / 4);
 }
 
+function textFromMessage(message: ModelMessage): string {
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .flatMap((part) => ("text" in part && typeof part.text === "string" ? [part.text] : []))
+      .join(" ");
+  }
+  return "";
+}
+
+function compactedCheckpoint(dropped: ModelMessage[]): string {
+  const requests = dropped
+    .filter((message) => message.role === "user")
+    .map(textFromMessage)
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(-4)
+    .map((text) => (text.length > 300 ? `${text.slice(0, 299)}…` : text));
+  const goals = requests.length
+    ? `\nEarlier user requests to preserve:\n${requests.map((text) => `- ${text}`).join("\n")}`
+    : "";
+  return `[Context compacted: ${dropped.length} earlier messages omitted. Continue from the recent turns below. Preserve active goals, decisions, and file paths from these request excerpts.]${goals}`;
+}
+
 /**
  * Compact conversation when nearing the context limit:
  * keep system + first user + recent tail; summarize the middle as a synthetic user note.
@@ -36,7 +60,7 @@ export function compactMessages(
   const dropped = messages.slice(2, -keepRecent);
   const summary: ModelMessage = {
     role: "user",
-    content: `[Context compacted: ${dropped.length} earlier messages omitted. Continue from the recent turns below. Preserve any active goals and file paths mentioned earlier.]`,
+    content: compactedCheckpoint(dropped),
   };
   return [...head, summary, ...tail];
 }

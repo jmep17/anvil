@@ -21,3 +21,11 @@ export function nextId(prefix = "i"): string {
   seq += 1;
   return `${prefix}-${seq}`;
 }
+
+/** Advance the in-memory counter after restoring a persisted transcript. */
+export function syncNextId(items: Array<{ id: string }>): void {
+  for (const item of items) {
+    const match = /-(\d+)$/.exec(item.id);
+    if (match) seq = Math.max(seq, Number(match[1]));
+  }
+}

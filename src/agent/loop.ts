@@ -94,7 +94,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   let mcpTools: ToolSet = opts.mcpTools ?? {};
   let mcpHandles: McpHandle[] = [];
   if (!opts.skipMcp && !opts.mcpTools) {
-    const connected = await connectMcpServers(opts.config.mcpServers);
+    const connected = await connectMcpServers(opts.config.mcpServers, (message) => {
+      opts.onEvent?.({ type: "error", message });
+    });
     mcpTools = connected.tools;
     mcpHandles = connected.handles;
   }

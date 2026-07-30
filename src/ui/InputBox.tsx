@@ -14,7 +14,7 @@ export function InputBox({
   value: string;
   cursor: number;
   busy: boolean;
-  pending?: { toolName: string; detail: string } | null;
+  pending?: { toolName: string; detail: string; preview?: string } | null;
   vimMode?: VimMode;
   editorMode?: "emacs" | "vim";
   pasteHint?: string | null;
@@ -29,9 +29,10 @@ export function InputBox({
         flexShrink={0}
       >
         <Text color="yellow">
-          Allow {pending.toolName}? {pending.detail.slice(0, 80)}
+          Allow {pending.toolName}? {pending.detail.slice(0, 120)}
         </Text>
-        <Text dimColor>[a] allow · [A] always · [d] deny</Text>
+        {pending.preview ? <Text dimColor>{pending.preview.slice(0, 240).replace(/\n/g, " ↵ ")}</Text> : null}
+        <Text dimColor>[a] allow once · [A] same action this session · [d] deny</Text>
       </Box>
     );
   }

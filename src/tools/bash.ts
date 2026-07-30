@@ -14,7 +14,7 @@ export function createBashTool(ctx: ToolContext) {
       if (ctx.mode === "plan") {
         return "Error: Bash is disabled in plan mode. Switch to build mode to run commands.";
       }
-      const ok = await requirePermission(ctx, "Bash", command);
+      const ok = await requirePermission(ctx, "Bash", command, undefined, command);
       if (!ok) return "Error: permission denied for Bash";
       const timeout = timeout_ms ?? 120_000;
       const proc = Bun.spawn(["bash", "-lc", command], {

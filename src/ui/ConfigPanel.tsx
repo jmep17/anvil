@@ -62,11 +62,15 @@ export function ConfigPanel({
   onChange,
   onClose,
   onStatus,
+  connectionStatus,
+  onRetryConnection,
 }: {
   config: AnvilConfig;
   onChange: (next: AnvilConfig) => void;
   onClose: () => void;
   onStatus?: (msg: string) => void;
+  connectionStatus?: string;
+  onRetryConnection?: () => void;
 }) {
   const [selected, setSelected] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -192,6 +196,10 @@ export function ConfigPanel({
         field.id === "editor" ? (config.ui.editor ?? "") : displayValue(config, field.id),
       );
       setEditing(true);
+      return;
+    }
+    if (ch === "r") {
+      onRetryConnection?.();
     }
   });
 
@@ -208,6 +216,9 @@ export function ConfigPanel({
         /config
       </Text>
       <Text dimColor>↑/↓ select · Enter edit/toggle · Esc close · saves to ~/.anvil/config.json</Text>
+      <Text dimColor>
+        Server: {connectionStatus ?? "unknown"} · API key: {config.apiKey ? "configured" : "missing"} · MCP: {Object.keys(config.mcpServers).length} configured · r retry
+      </Text>
       <Box flexDirection="column" marginTop={1}>
         {FIELDS.map((f, i) => {
           const active = i === selected;

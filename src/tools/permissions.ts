@@ -4,12 +4,13 @@ import type { PermissionDecision } from "../tools/types.ts";
 export async function askPermissionCli(
   toolName: string,
   detail: string,
+  preview?: string,
 ): Promise<PermissionDecision> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = (
       await rl.question(
-        `\n⚠ Allow ${toolName}?\n  ${detail}\n  [a]llow once / [A]lways / [d]eny: `,
+        `\n⚠ Allow ${toolName}?\n  ${detail}${preview ? `\n  ${preview}` : ""}\n  [a]llow once / [A]llow same action this session / [d]eny: `,
       )
     ).trim();
     if (answer === "A" || answer.toLowerCase() === "always") return "always";
@@ -24,6 +25,7 @@ export async function askPermissionCli(
 export async function allowAll(
   _toolName: string,
   _detail: string,
+  _preview?: string,
 ): Promise<PermissionDecision> {
   return "allow";
 }

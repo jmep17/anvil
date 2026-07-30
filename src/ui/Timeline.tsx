@@ -2,43 +2,27 @@ import React from "react";
 import { Box, Text } from "ink";
 import { ToolRow } from "./ToolRow.tsx";
 import type { TimelineItem } from "./types.ts";
-import { headDisplayLines, truncateDisplay } from "./format.ts";
+import { truncateDisplay, wrapDisplayLines } from "./format.ts";
 
-const ASSISTANT_PREVIEW_LINES = 8;
+type DisplayLine =
+  | { key: string; type: "item"; item: Exclude<TimelineItem, { kind: "assistant" }> }
+  | { key: string; type: "assistant"; text: string; first: boolean };
 
-function estimateLines(item: TimelineItem, columns: number): number {
-  if (item.kind === "tool") return 1;
-  if (item.kind === "assistant") {
-    return headDisplayLines(item.text, Math.max(20, columns - 2), ASSISTANT_PREVIEW_LINES)
-      .lines.length;
-  }
-  // user, thinking, status, error — always one display line
-  return 1;
+function toDisplayLines(items: TimelineItem[], columns: number): DisplayLine[] {
+  const width = Math.max(20, columns - 2);
+  return items.flatMap<DisplayLine>((item) => {
+    if (item.kind !== "assistant") return [{ key: item.id, type: "item", item }];
+    const lines = wrapDisplayLines(item.text, width);
+    return lines.map((text, index) => ({
+      key: `${item.id}-${index}`,
+      type: "assistant" as const,
+      text,
+      first: index === 0,
+    }));
+  });
 }
 
-function takeFit(items: TimelineItem[], maxLines: number, columns: number): TimelineItem[] {
-  if (maxLines <= 0 || items.length === 0) return [];
-  const out: TimelineItem[] = [];
-  let used = 0;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]!;
-    const n = estimateLines(item, columns);
-    if (out.length > 0 && used + n > maxLines) break;
-    out.unshift(item);
-    used += n;
-  }
-  return out;
-}
-
-function ItemView({
-  item,
-  columns,
-  maxAssistantLines,
-}: {
-  item: TimelineItem;
-  columns: number;
-  maxAssistantLines: number;
-}) {
+function ItemView({ item, columns }: { item: Exclude<TimelineItem, { kind: "assistant" }>; columns: number }) {
   switch (item.kind) {
     case "user":
       return (
@@ -47,23 +31,6 @@ function ItemView({
           {truncateDisplay(item.text.replace(/\n/g, " ↵ "), Math.max(20, columns - 7))}
         </Text>
       );
-    case "assistant": {
-      const excerpt = headDisplayLines(
-        item.text,
-        Math.max(20, columns - 2),
-        maxAssistantLines,
-      );
-      return (
-        <Box flexDirection="column">
-          {excerpt.lines.map((line, index) => (
-            <Box key={index} flexShrink={0}>
-              <Text color="magenta">{index === 0 ? "✦ " : "  "}</Text>
-              <Text>{line || " "}</Text>
-            </Box>
-          ))}
-        </Box>
-      );
-    }
     case "thinking":
       return (
         <Text dimColor italic>
@@ -83,12 +50,17 @@ export function Timeline({
   items,
   maxLines,
   columns,
+  scrollOffset = 0,
 }: {
   items: TimelineItem[];
   maxLines: number;
   columns: number;
+  /** Number of rendered transcript rows above the live tail. */
+  scrollOffset?: number;
 }) {
-  const visible = takeFit(items, maxLines, columns);
+  const lines = toDisplayLines(items, columns);
+  const end = Math.max(0, lines.length - scrollOffset);
+  const visible = lines.slice(Math.max(0, end - Math.max(maxLines, 1)), end);
   return (
     <Box
       flexDirection="column"
@@ -97,13 +69,16 @@ export function Timeline({
       justifyContent="flex-start"
       flexGrow={1}
     >
-      {visible.map((item) => (
-        <Box key={item.id} flexShrink={0}>
-          <ItemView
-            item={item}
-            columns={columns}
-            maxAssistantLines={Math.min(ASSISTANT_PREVIEW_LINES, Math.max(1, maxLines))}
-          />
+      {visible.map((line) => (
+        <Box key={line.key} flexShrink={0}>
+          {line.type === "assistant" ? (
+            <>
+              <Text color="magenta">{line.first ? "✦ " : "  "}</Text>
+              <Text>{line.text || " "}</Text>
+            </>
+          ) : (
+            <ItemView item={line.item} columns={columns} />
+          )}
         </Box>
       ))}
     </Box>

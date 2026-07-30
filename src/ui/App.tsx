@@ -14,7 +14,7 @@ import { Footer } from "./Footer.tsx";
 import { Header } from "./Header.tsx";
 import { InputBox } from "./InputBox.tsx";
 import { Timeline } from "./Timeline.tsx";
-import { nextId, type TimelineItem } from "./types.ts";
+import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { usePromptInput } from "./usePromptInput.ts";
 
 interface Props {
@@ -34,11 +34,14 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const [busy, setBusy] = useState(false);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [status, setStatus] = useState("starting…");
+  const [serverReady, setServerReady] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
   const [mode, setMode] = useState(config.mode);
   const [showConfig, setShowConfig] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
     detail: string;
+    preview?: string;
     resolve: (d: PermissionDecision) => void;
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -47,15 +50,26 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const messagesRef = useRef<ModelMessage[]>([]);
   const startedRef = useRef(false);
   const thinkingAccRef = useRef("");
+  const toolInputsRef = useRef(new Map<string, unknown>());
 
-  const push = useCallback((item: TimelineItem) => {
-    setItems((prev) => [...prev.slice(-200), item]);
-  }, []);
+  const recordTimeline = useCallback(
+    (item: TimelineItem) => {
+      if (item.kind === "status" || item.kind === "thinking") return;
+      void session.appendTimelineItem(item).catch(() => {});
+    },
+    [session],
+  );
+
+  const push = useCallback((item: TimelineItem, persist = true) => {
+    setItems((prev) => [...prev, item]);
+    setHistoryOffset(0);
+    if (persist) recordTimeline(item);
+  }, [recordTimeline]);
 
   const upsertTool = useCallback((item: Extract<TimelineItem, { kind: "tool" }>) => {
-    setItems((prev) => {
+      setItems((prev) => {
       const idx = prev.findIndex((x) => x.kind === "tool" && x.id === item.id);
-      if (idx === -1) return [...prev.slice(-200), item];
+        if (idx === -1) return [...prev, item];
       const next = prev.slice();
       next[idx] = item;
       return next;
@@ -64,7 +78,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   const refreshStatus = useCallback(
     (cfg: AnvilConfig, agentMode: AgentMode) => {
-      setStatus(`${cfg.model} · ${agentMode} · session ${session.id}`);
+      setStatus(`online · ${cfg.model} · ${agentMode} · session ${session.id}`);
     },
     [session.id],
   );
@@ -78,21 +92,45 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         return updated;
       });
       setMode(next);
-      refreshStatus({ ...configRef.current, mode: next }, next);
+      if (serverReady) refreshStatus({ ...configRef.current, mode: next }, next);
       push({ kind: "status", id: nextId("s"), text: `mode → ${next}` });
     },
-    [initialConfig, push, refreshStatus],
+    [initialConfig, push, refreshStatus, serverReady],
   );
 
   const toggleMode = useCallback(() => {
     applyMode(configRef.current.mode === "plan" ? "build" : "plan");
   }, [applyMode]);
 
+  const checkConnection = useCallback(
+    async (cfg = configRef.current) => {
+      setStatus(`checking ${cfg.baseURL}…`);
+      const probe = await probeServer(cfg);
+      if (!probe.ok) {
+        setServerReady(false);
+        setStatus(`offline · ${probe.detail}`);
+        push(
+          {
+            kind: "error",
+            id: nextId("e"),
+            text: `Cannot reach ${cfg.baseURL}. Start or configure the model server, then enter /retry. (${probe.detail})`,
+          },
+          false,
+        );
+        return false;
+      }
+      setServerReady(true);
+      refreshStatus(cfg, cfg.mode);
+      return true;
+    },
+    [push, refreshStatus],
+  );
+
   const askPermission = useCallback(
-    (toolName: string, detail: string) => {
-      if (yes) return allowAll(toolName, detail);
+    (toolName: string, detail: string, preview?: string) => {
+      if (yes) return allowAll(toolName, detail, preview);
       return new Promise<PermissionDecision>((resolve) => {
-        setPendingPermission({ toolName, detail, resolve });
+        setPendingPermission({ toolName, detail, preview, resolve });
       });
     },
     [yes],
@@ -107,6 +145,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       }
       if (text === "/config") {
         setShowConfig(true);
+        return;
+      }
+      if (text === "/retry") {
+        void checkConnection();
         return;
       }
       if (text.startsWith("/mode ")) {
@@ -131,6 +173,15 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         return;
       }
 
+      if (!serverReady) {
+        push({
+          kind: "error",
+          id: nextId("e"),
+          text: "Model server is offline. Enter /retry after it is available.",
+        }, false);
+        return;
+      }
+
       setBusy(true);
       setStreaming("");
       setThinking("");
@@ -152,6 +203,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           thinkingAccRef.current += event.text;
           setThinking(thinkingAccRef.current);
         } else if (event.type === "tool_start") {
+          toolInputsRef.current.set(event.id, event.input);
           upsertTool({
             kind: "tool",
             id: event.id,
@@ -160,26 +212,20 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             status: "running",
           });
         } else if (event.type === "tool_end") {
-          setItems((prev) => {
-            const prior = prev.find((x) => x.kind === "tool" && x.id === event.id);
-            const input = prior && prior.kind === "tool" ? prior.input : undefined;
-            const nextItem: TimelineItem = {
-              kind: "tool",
-              id: event.id,
-              name: event.name,
-              input,
-              status: event.error ? "error" : "done",
-              output: event.output,
-              ms: event.ms,
-            };
-            const idx = prev.findIndex((x) => x.kind === "tool" && x.id === event.id);
-            if (idx === -1) return [...prev.slice(-200), nextItem];
-            const copy = prev.slice();
-            copy[idx] = nextItem;
-            return copy;
-          });
+          const nextItem: Extract<TimelineItem, { kind: "tool" }> = {
+            kind: "tool",
+            id: event.id,
+            name: event.name,
+            input: toolInputsRef.current.get(event.id),
+            status: event.error ? "error" : "done",
+            output: event.output,
+            ms: event.ms,
+          };
+          toolInputsRef.current.delete(event.id);
+          upsertTool(nextItem);
+          recordTimeline(nextItem);
         } else if (event.type === "status") {
-          push({ kind: "status", id: nextId("s"), text: event.message });
+          push({ kind: "status", id: nextId("s"), text: event.message }, false);
         } else if (event.type === "error") {
           push({ kind: "error", id: nextId("e"), text: event.message });
         }
@@ -202,7 +248,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             kind: "thinking",
             id: nextId("th"),
             text: thinkingAccRef.current.trim(),
-          });
+          }, false);
         }
         if (result.text) {
           push({ kind: "assistant", id: nextId("a"), text: result.text });
@@ -222,7 +268,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         abortRef.current = null;
       }
     },
-    [applyMode, askPermission, busy, cwd, exit, push, session, upsertTool],
+    [applyMode, askPermission, busy, checkConnection, cwd, exit, push, recordTimeline, serverReady, session, upsertTool],
   );
 
   const prompt = usePromptInput({
@@ -240,36 +286,30 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   useEffect(() => {
     (async () => {
-      const probe = await probeServer(config);
-      if (!probe.ok) {
-        setStatus(`offline: ${probe.detail}`);
-        push({ kind: "error", id: nextId("e"), text: `Cannot reach ${config.baseURL}` });
-        return;
-      }
-      refreshStatus(config, mode);
       const loaded = await session.loadMessages();
       messagesRef.current = loaded;
-      if (initialPrompt && !startedRef.current) {
+      const transcript = await session.loadTimeline();
+      if (transcript.length > 0) {
+        syncNextId(transcript);
+        setItems(transcript);
+      } else if (loaded.length > 0) {
+        push(
+          {
+            kind: "status",
+            id: nextId("s"),
+            text: `resumed ${loaded.length} model messages; prior visual transcript is unavailable`,
+          },
+          false,
+        );
+      }
+      const online = await checkConnection(config);
+      if (online && initialPrompt && !startedRef.current) {
         startedRef.current = true;
         void submit(initialPrompt);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once on mount
   }, []);
-
-  useInput((ch, key) => {
-    if (!pendingPermission) return;
-    if (ch === "a") {
-      pendingPermission.resolve("allow");
-      setPendingPermission(null);
-    } else if (ch === "A") {
-      pendingPermission.resolve("always");
-      setPendingPermission(null);
-    } else if (ch === "d" || ch === "n") {
-      pendingPermission.resolve("deny");
-      setPendingPermission(null);
-    }
-  });
 
   const runningTools = items.filter(
     (i): i is Extract<TimelineItem, { kind: "tool" }> =>
@@ -286,7 +326,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   // The transcript is deliberately top-aligned, like a regular coding-agent
   // terminal, rather than floating above the prompt in the middle of the page.
   const inputContent = pendingPermission
-    ? 2
+    ? pendingPermission.preview ? 3 : 2
     : Math.min(inputLines, 6) + vimExtra + pasteExtra;
   const inputRows = inputContent + 2;
   const activityActive =
@@ -295,11 +335,37 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const chrome = 3 + inputRows + activityRows + 1;
   const timelineLines = Math.max(3, (rows || 24) - chrome);
 
+  useInput((ch, key) => {
+    if (pendingPermission && ch === "a") {
+      pendingPermission.resolve("allow");
+      setPendingPermission(null);
+    } else if (pendingPermission && ch === "A") {
+      pendingPermission.resolve("always");
+      setPendingPermission(null);
+    } else if (pendingPermission && (ch === "d" || ch === "n")) {
+      pendingPermission.resolve("deny");
+      setPendingPermission(null);
+    } else if (!pendingPermission && !showConfig && !busy && key.pageUp) {
+      setHistoryOffset((offset) =>
+        Math.min(10_000, offset + Math.max(1, Math.floor(timelineLines * 0.8))),
+      );
+    } else if (!pendingPermission && !showConfig && !busy && key.pageDown) {
+      setHistoryOffset((offset) =>
+        Math.max(0, offset - Math.max(1, Math.floor(timelineLines * 0.8))),
+      );
+    }
+  });
+
   return (
     <Box flexDirection="column" width="100%" height={rows || undefined}>
       <Header status={status} />
       <Box flexGrow={1} flexDirection="column" overflow="hidden">
-        <Timeline items={timelineItems} maxLines={timelineLines} columns={columns || 80} />
+        <Timeline
+          items={timelineItems}
+          maxLines={timelineLines}
+          columns={columns || 80}
+          scrollOffset={historyOffset}
+        />
         <Activity
           busy={busy}
           thinking={thinking}
@@ -316,10 +382,12 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             // keep mutable reference used by agent loop in sync
             Object.assign(initialConfig, next);
             setMode(next.mode);
-            refreshStatus(next, next.mode);
+            void checkConnection(next);
           }}
           onClose={() => setShowConfig(false)}
           onStatus={(msg) => push({ kind: "status", id: nextId("s"), text: msg })}
+          connectionStatus={status}
+          onRetryConnection={() => void checkConnection()}
         />
       ) : (
         <InputBox
@@ -331,7 +399,11 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           pasteHint={prompt.pasteHint}
           pending={
             pendingPermission
-              ? { toolName: pendingPermission.toolName, detail: pendingPermission.detail }
+              ? {
+                  toolName: pendingPermission.toolName,
+                  detail: pendingPermission.detail,
+                  preview: pendingPermission.preview,
+                }
               : null
           }
         />
@@ -341,6 +413,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         editorMode={config.ui.editorMode}
         vimMode={prompt.vimMode}
         showConfig={showConfig}
+        browsingHistory={historyOffset > 0}
       />
     </Box>
   );

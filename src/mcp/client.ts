@@ -13,6 +13,7 @@ export interface McpHandle {
 
 export async function connectMcpServers(
   servers: Record<string, McpServerConfig>,
+  onError?: (message: string) => void,
 ): Promise<{ tools: ToolSet; handles: McpHandle[] }> {
   const tools: ToolSet = {};
   const handles: McpHandle[] = [];
@@ -55,10 +56,12 @@ export async function connectMcpServers(
         });
       }
     } catch (err) {
-      console.error(
-        `anvil: failed to connect MCP server "${name}":`,
-        err instanceof Error ? err.message : err,
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      const message = `MCP server "${name}" unavailable: ${detail}`;
+      onError?.(message);
+      // Preserve a stderr diagnostic for REPL/one-shot invocations that do not
+      // render agent events.
+      if (!onError) console.error(`anvil: ${message}`);
     }
   }
 
