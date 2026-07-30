@@ -40,6 +40,17 @@ const TONE_FG: Record<Tone, string | undefined> = {
   error: colors.red,
 };
 
+const TONE_SURFACE: Record<Tone, string> = {
+  user: colors.surfaceRaised,
+  assistant: colors.surface,
+  thinking: colors.surfaceMuted,
+  "tool-running": colors.surfaceRaised,
+  "tool-done": colors.surfaceMuted,
+  "tool-error": colors.surfaceRaised,
+  status: colors.canvas,
+  error: colors.surfaceRaised,
+};
+
 function appendWrapped(
   lines: DisplayLine[],
   key: string,
@@ -148,8 +159,16 @@ function PlainBlock({
       : TextAttributes.NONE;
   const wrapped = wrapDisplayLines(body, width);
   return (
-    <box flexDirection="column" width="100%" flexShrink={0}>
-      <text fg={fg} attributes={dim}>
+    <box
+      flexDirection="column"
+      width="100%"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={fg}
+      backgroundColor={TONE_SURFACE[tone]}
+      paddingLeft={1}
+    >
+      <text fg={fg} attributes={TextAttributes.BOLD | dim}>
         {title}
       </text>
       {wrapped.map((line, index) => (
@@ -157,9 +176,6 @@ function PlainBlock({
           {`│  ${line || " "}`}
         </text>
       ))}
-      <text fg={fg} attributes={dim}>
-        ╰─
-      </text>
     </box>
   );
 }
@@ -184,13 +200,21 @@ function ToolBlock({
   const icon = item.status === "running" ? "◌" : item.status === "done" ? "✓" : "✕";
   const duration = formatToolDuration(item.ms);
   const chevron = expanded ? "▾" : "▸";
-  const title = `${chevron} ${icon} ${item.name} · ${state}${duration ? ` · ${duration}` : ""}`;
+  const title = `${chevron} ${icon} ${item.name}`;
   const summary = summarizeToolInput(item.input, Math.max(16, width - 2));
 
   return (
-    <box flexDirection="column" width="100%" flexShrink={0}>
+    <box
+      flexDirection="column"
+      width="100%"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={fg}
+      backgroundColor={TONE_SURFACE[tone]}
+      paddingLeft={1}
+    >
       <box
-        flexDirection="column"
+        flexDirection="row"
         width="100%"
         flexShrink={0}
         onMouseDown={(event) => {
@@ -199,36 +223,42 @@ function ToolBlock({
           setExpanded((value) => !value);
         }}
       >
-        <text fg={fg}>{title}</text>
-        {!expanded && summary ? (
-          <text fg={colors.muted} attributes={TextAttributes.DIM}>
-            {`  ${summary}`}
-          </text>
-        ) : null}
+        <text fg={fg} attributes={TextAttributes.BOLD}>{title}</text>
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          {`  ${state}${duration ? ` · ${duration}` : ""}`}
+        </text>
+        <box flexGrow={1} />
+        <text fg={expanded ? colors.cyan : colors.muted} attributes={TextAttributes.DIM}>
+          {expanded ? "details" : "click to inspect"}
+        </text>
       </box>
+      {!expanded && summary ? (
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          {`  ${summary}`}
+        </text>
+      ) : null}
       {expanded ? (
         <>
           <text fg={colors.gray} attributes={TextAttributes.DIM}>
-            │  input
+            INPUT
           </text>
           {wrapDisplayLines(formatToolInput(item.input), width).map((line, index) => (
             <text key={`in-${index}`} fg={colors.gray} attributes={TextAttributes.DIM}>
-              {`│  ${line || " "}`}
+              {`  ${line || " "}`}
             </text>
           ))}
           {item.output != null ? (
             <>
               <text fg={colors.gray} attributes={TextAttributes.DIM}>
-                │  output
+                OUTPUT
               </text>
               {wrapDisplayLines(item.output, width).map((line, index) => (
                 <text key={`out-${index}`} fg={fg}>
-                  {`│  ${line || " "}`}
+                  {`  ${line || " "}`}
                 </text>
               ))}
             </>
           ) : null}
-          <text fg={fg}>╰─</text>
         </>
       ) : null}
     </box>
@@ -244,8 +274,16 @@ function AssistantMarkdown({
 }) {
   const syntaxStyle = useMemo(() => getMarkdownSyntaxStyle(), []);
   return (
-    <box flexDirection="column" width="100%" flexShrink={0}>
-      <text>╭─ ✦ anvil</text>
+    <box
+      flexDirection="column"
+      width="100%"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={colors.purple}
+      backgroundColor={colors.surface}
+      paddingLeft={1}
+    >
+      <text fg={colors.purple} attributes={TextAttributes.BOLD}>✦ ANVIL</text>
       <box paddingLeft={2} width="100%">
         <markdown
           content={text}
@@ -255,7 +293,6 @@ function AssistantMarkdown({
           width="100%"
         />
       </box>
-      <text>╰─</text>
     </box>
   );
 }
@@ -269,16 +306,23 @@ function TimelineItemView({
 }) {
   switch (item.kind) {
     case "user":
-      return <PlainBlock title="╭─ you" body={item.text} tone="user" width={width} />;
+      return <PlainBlock title="YOU" body={item.text} tone="user" width={width} />;
     case "assistant":
       return <AssistantMarkdown text={item.text} />;
     case "thinking":
-      return <PlainBlock title="╭─ thinking" body={item.text} tone="thinking" width={width} />;
+      return <PlainBlock title="THINKING" body={item.text} tone="thinking" width={width} />;
     case "tool":
       return <ToolBlock item={item} width={width} />;
     case "status":
       return (
-        <box flexDirection="column" width="100%" flexShrink={0}>
+        <box
+          flexDirection="column"
+          width="100%"
+          flexShrink={0}
+          border={["left"]}
+          borderColor={colors.borderMuted}
+          paddingLeft={1}
+        >
           {wrapDisplayLines(`· ${item.text}`, width).map((line, index) => (
             <text key={index} fg={colors.gray} attributes={TextAttributes.DIM}>
               {`  ${line}`}
@@ -287,7 +331,7 @@ function TimelineItemView({
         </box>
       );
     case "error":
-      return <PlainBlock title="╭─ ✕ error" body={item.text} tone="error" width={width} />;
+      return <PlainBlock title="✕ ERROR" body={item.text} tone="error" width={width} />;
   }
 }
 
@@ -318,7 +362,7 @@ export function Timeline({
         rootOptions: { flexGrow: 1, width: "100%" },
         wrapperOptions: { flexGrow: 1 },
         viewportOptions: { flexGrow: 1 },
-        contentOptions: { flexDirection: "column", width: "100%", gap: 0 },
+        contentOptions: { flexDirection: "column", width: "100%", gap: 1 },
         scrollbarOptions: {
           trackOptions: {
             foregroundColor: colors.magenta,

@@ -59,6 +59,7 @@ export function InputBox({
         border
         borderStyle="rounded"
         borderColor={colors.yellow}
+        backgroundColor={colors.surfaceRaised}
         paddingX={1}
         flexDirection="column"
         flexShrink={0}
@@ -116,11 +117,12 @@ export function InputBox({
       border
       borderStyle="rounded"
       borderColor={busy ? colors.yellow : colors.cyan}
+      backgroundColor={colors.surface}
       paddingX={1}
       flexShrink={0}
     >
       <text fg={busy ? colors.yellow : colors.cyan} attributes={TextAttributes.BOLD}>
-        {`PROMPT${busy ? " · AGENT WORKING" : ""}`}
+        {busy ? "REQUEST · AGENT WORKING" : "REQUEST · READY"}
       </text>
       {editorMode === "vim" ? (
         <text fg={colors.muted} attributes={TextAttributes.DIM}>

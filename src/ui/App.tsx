@@ -25,6 +25,7 @@ import { InputBox, inputContentRows, permissionContentRows } from "./InputBox.ts
 import { Timeline } from "./Timeline.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
+import { colors } from "./theme.ts";
 import { usePromptInput } from "./usePromptInput.ts";
 import { keyChar } from "./keys.ts";
 
@@ -430,7 +431,12 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   });
 
   return (
-    <box flexDirection="column" width="100%" height={rows || undefined}>
+    <box
+      flexDirection="column"
+      width="100%"
+      height={rows || undefined}
+      backgroundColor={colors.canvas}
+    >
       <Header status={status} columns={columns || 80} />
       <box flexGrow={1} flexDirection="column" height={timelineLines}>
         <Timeline

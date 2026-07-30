@@ -2,7 +2,14 @@ import { SyntaxStyle } from "@opentui/core";
 
 /** Shared terminal palette (hex — reliable across OpenTUI ColorInput). */
 export const colors = {
+  canvas: "#090d18",
+  surface: "#101827",
+  surfaceRaised: "#172033",
+  surfaceMuted: "#0d1524",
+  border: "#334155",
+  borderMuted: "#1e293b",
   magenta: "#c084fc",
+  purple: "#a78bfa",
   cyan: "#22d3ee",
   yellow: "#facc15",
   green: "#4ade80",

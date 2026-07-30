@@ -211,7 +211,8 @@ export function ConfigPanel({
       flexDirection="column"
       border
       borderStyle="rounded"
-      borderColor={colors.cyan}
+      borderColor={colors.border}
+      backgroundColor={colors.surface}
       paddingX={1}
       width="100%"
       flexShrink={0}

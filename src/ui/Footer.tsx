@@ -32,15 +32,23 @@ export function footerHint({
 }
 
 export function footerHeight(state: FooterState, columns: number): number {
-  return wrapDisplayLines(footerHint(state), Math.max(12, columns - 2)).length;
+  // One top border row; horizontal padding and the hint marker use four columns.
+  return 1 + wrapDisplayLines(footerHint(state), Math.max(12, columns - 4)).length;
 }
 
 export function Footer({ columns, ...state }: FooterState & { columns: number }) {
   return (
-    <box paddingX={1} flexDirection="column" flexShrink={0}>
-      {wrapDisplayLines(footerHint(state), Math.max(12, columns - 2)).map((line, index) => (
+    <box
+      border={["top"]}
+      borderColor={colors.borderMuted}
+      backgroundColor={colors.surfaceMuted}
+      paddingX={1}
+      flexDirection="column"
+      flexShrink={0}
+    >
+      {wrapDisplayLines(footerHint(state), Math.max(12, columns - 4)).map((line, index) => (
         <text key={index} fg={colors.muted} attributes={TextAttributes.DIM}>
-          {`⌁ ${line}`}
+          {`⌁  ${line}`}
         </text>
       ))}
     </box>
