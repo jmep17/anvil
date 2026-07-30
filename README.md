@@ -50,7 +50,7 @@ bun run anvil -- -p -y "list files and summarize README.md"
 ## Modes
 
 - **build** (default): full tools with permission prompts for Write/Edit/Bash
-- **plan**: read-only (no Write/Edit/Bash) — `/mode plan`
+- **plan**: read-only (no Write/Edit/Bash) — `/mode plan`. Anvil presents the resulting plan as **PLAN FOR REVIEW** and waits for a decision: approve to switch to build mode and implement it, or decline and provide feedback for a revised plan.
 
 Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal alternate screen (fullscreen).
 
@@ -66,8 +66,8 @@ Esc interrupts a running turn in the TUI. The interactive TUI uses the terminal 
 | Ctrl+G | Edit prompt in `$VISUAL` / `$EDITOR` / nvim |
 | Esc | Interrupt (busy); dismiss `@` picker; in Vim insert → normal; otherwise clear input |
 | PgUp / PgDn | Browse the full transcript; PgDn returns to live output |
-| Shift+Tab | Toggle plan ↔ build |
-| a / A / d | Allow once / allow the exact same action for this session / deny |
+| Shift+Tab | Toggle plan ↔ build (disabled while a plan is awaiting review) |
+| a / A / d | Allow once / allow the exact same action for this session / deny; when a plan is under review, `a` approves and implements it, while `d` requests feedback for a revision |
 | `/config` | Interactive settings panel (model, editor mode, …) |
 | `/retry` | Recheck the configured model server after an offline error |
 

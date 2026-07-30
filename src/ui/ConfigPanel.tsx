@@ -10,6 +10,7 @@ import {
 } from "../config/cli.ts";
 import { keyChar } from "./keys.ts";
 import { colors } from "./theme.ts";
+import { wrapDisplayLines } from "./format.ts";
 
 export type ConfigField =
   | "model"
@@ -29,6 +30,33 @@ const FIELDS: { id: ConfigField; label: string; kind: "text" | "toggle" | "numbe
   { id: "maxSteps", label: "Max steps", kind: "number" },
   { id: "baseURL", label: "Base URL", kind: "text" },
 ];
+
+export function configVisibleRange(selected: number, maxRows: number, columns: number) {
+  const contentWidth = Math.max(8, columns - 2);
+  const hintLines = wrapDisplayLines(
+    "↑/↓ select · Enter edit/toggle · r retry · Esc close",
+    contentWidth,
+  );
+  // Keep a row available for the selection. On a narrow, short terminal the
+  // help text yields first, never the options themselves.
+  const showHint = maxRows >= hintLines.length + 2;
+  const visibleCount = Math.max(1, maxRows - 1 - (showHint ? hintLines.length : 0));
+  const start = Math.min(
+    Math.max(0, selected - visibleCount + 1),
+    Math.max(0, FIELDS.length - visibleCount),
+  );
+  return {
+    start,
+    end: Math.min(FIELDS.length, start + visibleCount),
+    contentWidth,
+    hintLines: showHint ? hintLines : [],
+  };
+}
+
+function clip(text: string, width: number): string {
+  if (text.length <= width) return text;
+  return `${text.slice(0, Math.max(1, width - 1))}…`;
+}
 
 function displayValue(config: AnvilConfig, id: ConfigField): string {
   switch (id) {
@@ -65,15 +93,17 @@ export function ConfigPanel({
   onChange,
   onClose,
   onStatus,
-  connectionStatus,
   onRetryConnection,
+  columns,
+  maxRows,
 }: {
   config: AnvilConfig;
   onChange: (next: AnvilConfig) => void;
   onClose: () => void;
   onStatus?: (msg: string) => void;
-  connectionStatus?: string;
   onRetryConnection?: () => void;
+  columns: number;
+  maxRows: number;
 }) {
   const [selected, setSelected] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -206,30 +236,31 @@ export function ConfigPanel({
     }
   });
 
+  const range = configVisibleRange(selected, maxRows, columns);
   return (
     <box
       flexDirection="column"
-      border
-      borderStyle="rounded"
+      border={["left"]}
       borderColor={colors.border}
-      backgroundColor={colors.surface}
       paddingX={1}
       width="100%"
       flexShrink={0}
     >
       <text fg={colors.purple} attributes={TextAttributes.BOLD}>
-        CONFIGURATION
+        {`CONFIGURATION  ${selected + 1}/${FIELDS.length}`}
       </text>
-      <text fg={colors.muted} attributes={TextAttributes.DIM}>
-        ↑/↓ select · Enter edit/toggle · Esc close · saves to ~/.anvil/config.json
-      </text>
-      <text fg={colors.muted} attributes={TextAttributes.DIM}>
-        {`Server: ${connectionStatus ?? "unknown"} · API key: ${config.apiKey ? "configured" : "missing"} · MCP: ${Object.keys(config.mcpServers).length} configured · r retry`}
-      </text>
-      <box flexDirection="column" marginTop={1}>
-        {FIELDS.map((f, i) => {
+      {range.hintLines.map((line, index) => (
+        <text key={`hint-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
+          {line}
+        </text>
+      ))}
+      <box flexDirection="column">
+        {FIELDS.slice(range.start, range.end).map((f, offset) => {
+          const i = range.start + offset;
           const active = i === selected;
           const val = displayValue(config, f.id);
+          const value = editing && active ? `${draft}█` : val;
+          const row = `${active ? "›" : " "} ${f.label}: ${value}`;
           return (
             <box
               key={f.id}
@@ -240,23 +271,8 @@ export function ConfigPanel({
                 fg={active ? colors.selectionFg : colors.text}
                 attributes={active ? TextAttributes.BOLD : TextAttributes.NONE}
               >
-                {`${active ? "› " : "  "}${f.label.padEnd(16)}`}
+                {clip(row, range.contentWidth)}
               </text>
-              {editing && active ? (
-                <text fg={colors.selectionFg} attributes={TextAttributes.BOLD}>
-                  {draft}
-                  <span fg={colors.selectionFg} attributes={TextAttributes.DIM}>
-                    █
-                  </span>
-                </text>
-              ) : (
-                <text
-                  fg={active ? colors.selectionFg : colors.muted}
-                  attributes={active ? TextAttributes.BOLD : TextAttributes.DIM}
-                >
-                  {val}
-                </text>
-              )}
             </box>
           );
         })}

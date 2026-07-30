@@ -18,6 +18,7 @@ import {
 import type { PermissionDecision } from "../tools/types.ts";
 import { compactMessages } from "./compact.ts";
 import { createModel } from "./model.ts";
+import { shouldPauseReadTool } from "./stall.ts";
 import { buildSystemPrompt } from "./system.ts";
 
 export interface RunAgentOptions {
@@ -165,6 +166,17 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
     abortSignal: opts.abortSignal,
     stopWhen: isStepCount(opts.config.maxSteps),
     maxRetries: 2,
+    prepareStep: ({ steps }) => {
+      if (!shouldPauseReadTool(steps)) return undefined;
+
+      opts.onEvent?.({
+        type: "status",
+        message: "Repeated Read paused for one step; choose an action or report the blocker.",
+      });
+      return {
+        activeTools: Object.keys(tools).filter((name) => name !== "Read"),
+      };
+    },
     onError: ({ error }) => {
       opts.onEvent?.({
         type: "error",

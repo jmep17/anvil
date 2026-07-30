@@ -38,6 +38,8 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Detected stack: next, shadcn");
     expect(prompt).toContain("Recommended skills: shadcn, frontend");
     expect(prompt).toContain("Use Bun");
+    expect(prompt).toContain("Do not repeat an identical Read");
+    expect(prompt).toContain("do not stop after saying what you intend to implement");
   });
 
   test("plan mode nudges skill loading", () => {
@@ -53,6 +55,7 @@ describe("buildSystemPrompt", () => {
     });
     expect(prompt).toContain("read-only");
     expect(prompt).toContain("load recommended or relevant skills");
+    expect(prompt).toContain("wait for the user to approve the plan");
     expect(prompt).toContain("Loaded skills (always/auto)");
     expect(prompt).toContain("### Skill: docs");
   });

@@ -38,7 +38,7 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
 
   const planNudge =
     opts.mode === "plan"
-      ? "\n- In plan mode: before proposing an implementation plan, load recommended or relevant skills with the Skill tool."
+      ? "\n- In plan mode: before proposing an implementation plan, load recommended or relevant skills with the Skill tool. End with a self-contained plan covering the files to change, implementation steps, verification, and material risks. Do not claim implementation has started; wait for the user to approve the plan."
       : "";
 
   const injected =
@@ -59,6 +59,8 @@ Mode: ${opts.mode}${opts.mode === "plan" ? " (read-only: no Write/Edit/Bash)" : 
 
 Guidelines:
 - Prefer Read/Glob/Grep over Bash for exploring code.
+- Read only the context needed for the next action. Do not repeat an identical Read unless a tool has changed that file or you need a different line range.
+- In build mode, when the user asks for a change, make the edit once you have enough context; do not stop after saying what you intend to implement. If you cannot proceed, state the concrete blocker instead.
 - Make focused edits with Edit; use Write for new files.
 - After code changes, verify with tests or typechecks when appropriate.
 - Be concise. Do not dump huge irrelevant file contents into your final answer.

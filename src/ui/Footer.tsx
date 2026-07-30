@@ -1,4 +1,5 @@
 import { TextAttributes } from "@opentui/core";
+import { memo } from "react";
 import type { EditorMode } from "../config/types.ts";
 import { wrapDisplayLines } from "./format.ts";
 import { colors } from "./theme.ts";
@@ -11,6 +12,7 @@ export interface FooterState {
   showConfig?: boolean;
   browsingHistory?: boolean;
   filePicker?: boolean;
+  planReview?: "ready" | "denying";
 }
 
 export function footerHint({
@@ -20,9 +22,12 @@ export function footerHint({
   showConfig,
   browsingHistory,
   filePicker,
+  planReview,
 }: FooterState): string {
   if (showConfig) return "↑/↓ navigate · Enter edit · Esc close";
   if (busy) return "PgUp/PgDn transcript · click tool to expand · Esc interrupt";
+  if (planReview === "ready") return "[a] approve & implement · [d] decline with feedback";
+  if (planReview === "denying") return "Describe changes · Enter revise plan · Esc return to review";
   if (filePicker) return "↑/↓ files · Tab/Enter select · Esc dismiss · type to filter";
   if (browsingHistory) return "PgUp/PgDn transcript · PgDn returns live · Enter send · /config /exit";
   if (editorMode === "vim" && vimMode === "normal") {
@@ -36,7 +41,7 @@ export function footerHeight(state: FooterState, columns: number): number {
   return 1 + wrapDisplayLines(footerHint(state), Math.max(12, columns - 4)).length;
 }
 
-export function Footer({ columns, ...state }: FooterState & { columns: number }) {
+export const Footer = memo(function Footer({ columns, ...state }: FooterState & { columns: number }) {
   return (
     <box
       border={["top"]}
@@ -53,4 +58,4 @@ export function Footer({ columns, ...state }: FooterState & { columns: number })
       ))}
     </box>
   );
-}
+});

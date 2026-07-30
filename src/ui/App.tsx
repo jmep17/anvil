@@ -21,7 +21,12 @@ import { ConfigPanel } from "./ConfigPanel.tsx";
 import { Footer, footerHeight } from "./Footer.tsx";
 import { FilePicker, filePickerRows } from "./FilePicker.tsx";
 import { Header, headerHeight } from "./Header.tsx";
-import { InputBox, inputContentRows, permissionContentRows } from "./InputBox.tsx";
+import {
+  InputBox,
+  inputContentRows,
+  permissionContentRows,
+  planReviewContentRows,
+} from "./InputBox.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
@@ -56,6 +61,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     preview?: string;
     resolve: (d: PermissionDecision) => void;
   } | null>(null);
+  const [planReview, setPlanReview] = useState<{
+    plan: string;
+    phase: "ready" | "denying";
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [streaming, setStreaming] = useState("");
   const [thinking, setThinking] = useState("");
@@ -63,7 +72,28 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const startedRef = useRef(false);
   const thinkingAccRef = useRef("");
   const streamingAccRef = useRef("");
+  const liveRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toolInputsRef = useRef(new Map<string, unknown>());
+
+  // A model can emit several tiny chunks between terminal frames. Publishing each
+  // one reflows the complete markdown transcript and produces visible tearing.
+  const publishLive = useCallback(() => {
+    liveRenderTimerRef.current = null;
+    setThinking(thinkingAccRef.current);
+    setStreaming(streamingAccRef.current);
+  }, []);
+
+  const scheduleLiveRender = useCallback(() => {
+    if (liveRenderTimerRef.current) return;
+    liveRenderTimerRef.current = setTimeout(publishLive, 50);
+  }, [publishLive]);
+
+  const cancelLiveRender = useCallback(() => {
+    if (liveRenderTimerRef.current) clearTimeout(liveRenderTimerRef.current);
+    liveRenderTimerRef.current = null;
+  }, []);
+
+  useEffect(() => cancelLiveRender, [cancelLiveRender]);
 
   const exit = useCallback(() => {
     renderer.destroy();
@@ -109,20 +139,21 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     [recordTimeline],
   );
 
-  const flushLive = useCallback(() => {
+  const flushLive = useCallback((kind: "assistant" | "plan" = "assistant") => {
+    cancelLiveRender();
     const thinkingText = thinkingAccRef.current.trim();
     if (thinkingText) {
       push({ kind: "thinking", id: nextId("th"), text: thinkingText }, false);
     }
     const assistantText = streamingAccRef.current;
     if (assistantText.trim()) {
-      push({ kind: "assistant", id: nextId("a"), text: assistantText });
+      push({ kind, id: nextId(kind === "plan" ? "p" : "a"), text: assistantText });
     }
     thinkingAccRef.current = "";
     streamingAccRef.current = "";
     setThinking("");
     setStreaming("");
-  }, [push]);
+  }, [cancelLiveRender, push]);
 
   const upsertTool = useCallback((item: Extract<TimelineItem, { kind: "tool" }>) => {
     setItems((prev) => {
@@ -196,26 +227,27 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const submit = useCallback(
     async (text: string) => {
       if (!text.trim() || busy) return;
+      const revisingPlan = planReview?.phase === "denying";
       if (text === "/exit") {
         exit();
         return;
       }
-      if (text === "/config") {
+      if (!revisingPlan && text === "/config") {
         setShowConfig(true);
         return;
       }
-      if (text === "/retry") {
+      if (!revisingPlan && text === "/retry") {
         void checkConnection();
         return;
       }
-      if (text.startsWith("/mode ")) {
+      if (!revisingPlan && text.startsWith("/mode ")) {
         const m = text.slice(6).trim();
         if (m === "plan" || m === "build") {
           applyMode(m);
         }
         return;
       }
-      if (text === "/compact") {
+      if (!revisingPlan && text === "/compact") {
         const next = compactMessages(
           messagesRef.current,
           configRef.current.contextLength,
@@ -243,13 +275,22 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       }
 
       setBusy(true);
+      cancelLiveRender();
       setStreaming("");
       setThinking("");
       thinkingAccRef.current = "";
       streamingAccRef.current = "";
       const { displayText, modelText } = await expandFileMentions(text, cwd);
-      push({ kind: "user", id: nextId("u"), text: displayText });
-      const userMsg: ModelMessage = { role: "user", content: modelText };
+      const request = revisingPlan
+        ? `The previous implementation plan was declined. Revise it in response to this feedback:\n${modelText}`
+        : modelText;
+      if (revisingPlan) setPlanReview(null);
+      push({
+        kind: "user",
+        id: nextId("u"),
+        text: revisingPlan ? `Plan feedback: ${displayText}` : displayText,
+      });
+      const userMsg: ModelMessage = { role: "user", content: request };
       const before = messagesRef.current.length;
       const nextMessages = [...messagesRef.current, userMsg];
       messagesRef.current = nextMessages;
@@ -263,10 +304,10 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         if (event.type === "text") {
           streamedAny = true;
           streamingAccRef.current += event.text;
-          setStreaming(streamingAccRef.current);
+          scheduleLiveRender();
         } else if (event.type === "thinking") {
           thinkingAccRef.current += event.text;
-          setThinking(thinkingAccRef.current);
+          scheduleLiveRender();
         } else if (event.type === "tool_start") {
           flushLive();
           toolInputsRef.current.set(event.id, event.input);
@@ -309,9 +350,17 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         const added = result.messages.slice(before + 1);
         for (const m of added) await session.appendMessage(m);
         messagesRef.current = result.messages;
-        flushLive();
+        const isPlan = configRef.current.mode === "plan";
+        flushLive(isPlan ? "plan" : "assistant");
         if (!streamedAny && result.text?.trim()) {
-          push({ kind: "assistant", id: nextId("a"), text: result.text });
+          push({
+            kind: isPlan ? "plan" : "assistant",
+            id: nextId(isPlan ? "p" : "a"),
+            text: result.text,
+          });
+        }
+        if (isPlan && result.text?.trim()) {
+          setPlanReview({ plan: result.text, phase: "ready" });
         }
         for (const h of result.mcpHandles) await h.close().catch(() => {});
       } catch (err) {
@@ -330,13 +379,16 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       applyMode,
       askPermission,
       busy,
+      cancelLiveRender,
       checkConnection,
       cwd,
       exit,
       flushLive,
       push,
+      planReview,
       recordTimeline,
       serverReady,
+      scheduleLiveRender,
       session,
       upsertTool,
     ],
@@ -344,7 +396,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
 
   const prompt = usePromptInput({
     busy,
-    blocked: Boolean(pendingPermission) || showConfig,
+    blocked: Boolean(pendingPermission) || showConfig || planReview?.phase === "ready",
     editorMode: config.ui.editorMode,
     editor: config.ui.editor,
     cwd,
@@ -352,9 +404,18 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     onSubmit: (text) => void submit(text),
     onAbort: () => abortRef.current?.abort(),
     onToggleAgentMode: toggleMode,
+    allowModeToggle: !planReview,
     onPasteNotice: (msg) => push({ kind: "status", id: nextId("s"), text: msg }),
     isActive: !showConfig && !pendingPermission,
   });
+
+  const approvePlan = useCallback(() => {
+    if (planReview?.phase !== "ready") return;
+    setPlanReview(null);
+    applyMode("build");
+    push({ kind: "status", id: nextId("s"), text: "plan approved · starting implementation" });
+    void submit("Implement the approved plan above. Make the changes now, verify them, and report the results.");
+  }, [applyMode, planReview, push, submit]);
 
   useEffect(() => {
     (async () => {
@@ -388,7 +449,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   const pickerExtra = prompt.filePicker ? filePickerRows(prompt.filePicker.matches) : 0;
   const inputContent = pendingPermission
     ? permissionContentRows(pendingPermission, columns || 80)
-    : inputContentRows(prompt.buffer.value, columns || 80) + vimExtra + pasteExtra;
+    : planReview
+      ? planReviewContentRows(planReview.phase, prompt.buffer.value, columns || 80)
+      : inputContentRows(prompt.buffer.value, columns || 80) + vimExtra + pasteExtra;
   const inputRows = inputContent + 2 + pickerExtra;
   const footerState = {
     busy,
@@ -397,10 +460,13 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     showConfig,
     browsingHistory,
     filePicker: Boolean(prompt.filePicker),
+    planReview: planReview?.phase,
   };
   const chrome =
-    headerHeight(status, columns || 80) + inputRows + footerHeight(footerState, columns || 80);
-  const timelineLines = Math.max(3, (rows || 24) - chrome);
+    headerHeight(status, columns || 80) +
+    (showConfig ? 0 : inputRows) +
+    footerHeight(footerState, columns || 80);
+  const timelineLines = Math.max(showConfig ? 2 : 3, (rows || 24) - chrome);
 
   useKeyboard((key) => {
     if (pendingPermission) {
@@ -415,6 +481,20 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
         pendingPermission.resolve("deny");
         setPendingPermission(null);
       }
+      return;
+    }
+    if (planReview?.phase === "ready") {
+      const ch = keyChar(key);
+      if (ch === "a") {
+        approvePlan();
+      } else if (ch === "d" || ch === "n") {
+        setPlanReview({ ...planReview, phase: "denying" });
+      }
+      return;
+    }
+    if (planReview?.phase === "denying" && key.name === "escape") {
+      prompt.resetBuffer();
+      setPlanReview({ ...planReview, phase: "ready" });
       return;
     }
     if (showConfig) return;
@@ -438,15 +518,17 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
       backgroundColor={colors.canvas}
     >
       <Header status={status} columns={columns || 80} />
-      <box flexGrow={1} flexDirection="column" height={timelineLines}>
-        <Timeline
-          items={items}
-          columns={columns || 80}
-          thinking={thinking}
-          streaming={streaming}
-          scrollRef={scrollRef}
-        />
-      </box>
+      {!showConfig ? (
+        <box flexGrow={1} flexDirection="column" height={timelineLines}>
+          <Timeline
+            items={items}
+            columns={columns || 80}
+            thinking={thinking}
+            streaming={streaming}
+            scrollRef={scrollRef}
+          />
+        </box>
+      ) : null}
       {showConfig ? (
         <ConfigPanel
           config={config}
@@ -457,8 +539,9 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
           }}
           onClose={() => setShowConfig(false)}
           onStatus={(msg) => push({ kind: "status", id: nextId("s"), text: msg })}
-          connectionStatus={status}
           onRetryConnection={() => void checkConnection()}
+          columns={columns || 80}
+          maxRows={timelineLines}
         />
       ) : (
         <>
@@ -477,6 +560,7 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
             vimMode={prompt.vimMode}
             editorMode={config.ui.editorMode}
             pasteHint={prompt.pasteHint}
+            planReview={planReview?.phase}
             columns={columns || 80}
             pending={
               pendingPermission

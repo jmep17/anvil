@@ -1,4 +1,4 @@
-import { useMemo, useState, type Ref } from "react";
+import { memo, useMemo, useState, type Ref } from "react";
 import {
   MouseButton,
   TextAttributes,
@@ -16,6 +16,7 @@ import type { TimelineItem } from "./types.ts";
 type Tone =
   | "user"
   | "assistant"
+  | "plan"
   | "thinking"
   | "tool-running"
   | "tool-done"
@@ -32,23 +33,13 @@ interface DisplayLine {
 const TONE_FG: Record<Tone, string | undefined> = {
   user: colors.cyan,
   assistant: colors.text,
+  plan: colors.green,
   thinking: colors.gray,
   "tool-running": colors.yellow,
   "tool-done": colors.green,
   "tool-error": colors.red,
   status: colors.gray,
   error: colors.red,
-};
-
-const TONE_SURFACE: Record<Tone, string> = {
-  user: colors.surfaceRaised,
-  assistant: colors.surface,
-  thinking: colors.surfaceMuted,
-  "tool-running": colors.surfaceRaised,
-  "tool-done": colors.surfaceMuted,
-  "tool-error": colors.surfaceRaised,
-  status: colors.canvas,
-  error: colors.surfaceRaised,
 };
 
 function appendWrapped(
@@ -108,6 +99,11 @@ function appendItem(lines: DisplayLine[], item: TimelineItem, width: number): vo
       appendWrapped(lines, item.id, item.text, "assistant", width);
       lines.push({ key: `${item.id}-end`, text: "╰─", tone: "assistant" });
       return;
+    case "plan":
+      lines.push({ key: `${item.id}-title`, text: "╭─ ✓ plan for review", tone: "plan" });
+      appendWrapped(lines, item.id, item.text, "plan", width);
+      lines.push({ key: `${item.id}-end`, text: "╰─", tone: "plan" });
+      return;
     case "thinking":
       lines.push({ key: `${item.id}-title`, text: "╭─ thinking", tone: "thinking" });
       appendWrapped(lines, item.id, item.text, "thinking", width);
@@ -141,7 +137,7 @@ export function buildTranscriptLines(
   return lines;
 }
 
-function PlainBlock({
+const PlainBlock = memo(function PlainBlock({
   title,
   body,
   tone,
@@ -165,7 +161,6 @@ function PlainBlock({
       flexShrink={0}
       border={["left"]}
       borderColor={fg}
-      backgroundColor={TONE_SURFACE[tone]}
       paddingLeft={1}
     >
       <text fg={fg} attributes={TextAttributes.BOLD | dim}>
@@ -178,9 +173,9 @@ function PlainBlock({
       ))}
     </box>
   );
-}
+});
 
-function ToolBlock({
+const ToolBlock = memo(function ToolBlock({
   item,
   width,
 }: {
@@ -210,7 +205,6 @@ function ToolBlock({
       flexShrink={0}
       border={["left"]}
       borderColor={fg}
-      backgroundColor={TONE_SURFACE[tone]}
       paddingLeft={1}
     >
       <box
@@ -263,14 +257,18 @@ function ToolBlock({
       ) : null}
     </box>
   );
-}
+});
 
-function AssistantMarkdown({
+const AssistantMarkdown = memo(function AssistantMarkdown({
   text,
   streaming,
+  title = "✦ ANVIL",
+  borderColor = colors.purple,
 }: {
   text: string;
   streaming?: boolean;
+  title?: string;
+  borderColor?: string;
 }) {
   const syntaxStyle = useMemo(() => getMarkdownSyntaxStyle(), []);
   return (
@@ -279,11 +277,10 @@ function AssistantMarkdown({
       width="100%"
       flexShrink={0}
       border={["left"]}
-      borderColor={colors.purple}
-      backgroundColor={colors.surface}
+      borderColor={borderColor}
       paddingLeft={1}
     >
-      <text fg={colors.purple} attributes={TextAttributes.BOLD}>✦ ANVIL</text>
+      <text fg={borderColor} attributes={TextAttributes.BOLD}>{title}</text>
       <box paddingLeft={2} width="100%">
         <markdown
           content={text}
@@ -295,9 +292,9 @@ function AssistantMarkdown({
       </box>
     </box>
   );
-}
+});
 
-function TimelineItemView({
+const TimelineItemView = memo(function TimelineItemView({
   item,
   width,
 }: {
@@ -309,6 +306,8 @@ function TimelineItemView({
       return <PlainBlock title="YOU" body={item.text} tone="user" width={width} />;
     case "assistant":
       return <AssistantMarkdown text={item.text} />;
+    case "plan":
+      return <AssistantMarkdown text={item.text} title="✓ PLAN FOR REVIEW" borderColor={colors.green} />;
     case "thinking":
       return <PlainBlock title="THINKING" body={item.text} tone="thinking" width={width} />;
     case "tool":
@@ -333,9 +332,9 @@ function TimelineItemView({
     case "error":
       return <PlainBlock title="✕ ERROR" body={item.text} tone="error" width={width} />;
   }
-}
+});
 
-export function Timeline({
+export const Timeline = memo(function Timeline({
   items,
   columns,
   thinking,
@@ -388,4 +387,4 @@ export function Timeline({
       ) : null}
     </scrollbox>
   );
-}
+});

@@ -33,6 +33,15 @@ export function permissionContentRows(
   return text.reduce((total, line) => total + wrapDisplayLines(line, width).length, 0);
 }
 
+export function planReviewContentRows(
+  phase: "ready" | "denying",
+  value: string,
+  columns: number,
+): number {
+  if (phase === "ready") return 2;
+  return inputContentRows(value, columns) + 1;
+}
+
 export function InputBox({
   value,
   cursor,
@@ -41,6 +50,7 @@ export function InputBox({
   vimMode,
   editorMode,
   pasteHint,
+  planReview,
   columns,
 }: {
   value: string;
@@ -50,6 +60,7 @@ export function InputBox({
   vimMode?: VimMode;
   editorMode?: "emacs" | "vim";
   pasteHint?: string | null;
+  planReview?: "ready" | "denying" | null;
   columns: number;
 }) {
   if (pending) {
@@ -92,6 +103,18 @@ export function InputBox({
     );
   }
 
+  if (planReview === "ready") {
+    const width = Math.max(12, columns - 4);
+    return (
+      <box border borderStyle="rounded" borderColor={colors.green} backgroundColor={colors.surfaceRaised} paddingX={1} flexDirection="column" flexShrink={0}>
+        <text fg={colors.green} attributes={TextAttributes.BOLD}>PLAN READY FOR REVIEW</text>
+        {wrapDisplayLines("[a] approve & implement · [d] decline with feedback", width).map((line, index) => (
+          <text key={index} fg={colors.muted} attributes={TextAttributes.DIM}>{line}</text>
+        ))}
+      </box>
+    );
+  }
+
   const lines = value.length === 0 ? [""] : value.split("\n");
   const width = Math.max(8, columns - 6);
   let remaining = cursor;
@@ -122,8 +145,13 @@ export function InputBox({
       flexShrink={0}
     >
       <text fg={busy ? colors.yellow : colors.cyan} attributes={TextAttributes.BOLD}>
-        {busy ? "REQUEST · AGENT WORKING" : "REQUEST · READY"}
+        {busy ? "REQUEST · AGENT WORKING" : planReview === "denying" ? "PLAN FEEDBACK · WHY REVISE?" : "REQUEST · READY"}
       </text>
+      {planReview === "denying" ? (
+        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          Describe what to change, then press Enter to request a revised plan.
+        </text>
+      ) : null}
       {editorMode === "vim" ? (
         <text fg={colors.muted} attributes={TextAttributes.DIM}>
           {vimMode === "normal" ? "-- NORMAL --" : "-- INSERT --"}

@@ -72,4 +72,12 @@ describe("buildTranscriptLines", () => {
     expect(tool2).toBeGreaterThan(second);
     expect(third).toBeGreaterThan(tool2);
   });
+
+  test("labels plan output for review", () => {
+    const lines = buildTranscriptLines(
+      [{ kind: "plan", id: "p-1", text: "1. Update the parser" }],
+      80,
+    );
+    expect(lines.map((line) => line.text).join("\n")).toContain("plan for review");
+  });
 });

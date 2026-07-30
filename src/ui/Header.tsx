@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { wrapDisplayLines } from "./format.ts";
 import { colors } from "./theme.ts";
 import { TextAttributes } from "@opentui/core";
@@ -12,7 +13,7 @@ export function headerHeight(status: string, columns: number): number {
   return 3 + statusLines(status, columns).length;
 }
 
-export function Header({ status, columns }: { status: string; columns: number }) {
+export const Header = memo(function Header({ status, columns }: { status: string; columns: number }) {
   const statusColor = status.startsWith("online")
     ? colors.green
     : status.startsWith("offline")
@@ -46,4 +47,4 @@ export function Header({ status, columns }: { status: string; columns: number })
       ))}
     </box>
   );
-}
+});

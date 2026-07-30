@@ -67,6 +67,38 @@ export async function runRepl(opts: {
 
   let messages: ModelMessage[] = await opts.session.loadMessages();
   const ask = opts.yes ? allowAll : askPermissionCli;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  const reviewPlan = async (): Promise<void> => {
+    if (opts.prompt) {
+      console.log("Plan ready for review. Run Anvil interactively to approve and implement it.");
+      return;
+    }
+
+    while (true) {
+      const answer = (
+        await rl.question("Plan ready for review: [a]pprove & implement / [d]ecline with feedback: ")
+      ).trim().toLowerCase();
+      if (answer === "a" || answer === "approve") {
+        opts.config.mode = "build";
+        console.log("plan approved · mode → build");
+        await runTurn("Implement the approved plan above. Make the changes now, verify them, and report the results.");
+        return;
+      }
+      if (answer === "d" || answer === "deny" || answer === "decline") {
+        const feedback = (await rl.question("Why should this plan change? ")).trim();
+        if (!feedback) {
+          console.log("A reason is required to revise the plan.");
+          continue;
+        }
+        await runTurn(
+          `The previous implementation plan was declined. Revise it in response to this feedback:\n${feedback}`,
+        );
+        return;
+      }
+      console.log("Enter a to approve or d to decline with feedback.");
+    }
+  };
 
   const runTurn = async (userText: string) => {
     const before = messages.length;
@@ -83,6 +115,7 @@ export async function runRepl(opts: {
     process.once("SIGINT", onSigInt);
 
     let streamed = false;
+    let planText = "";
     try {
       const result = await runAgent({
         config: opts.config,
@@ -98,11 +131,13 @@ export async function runRepl(opts: {
       const added = result.messages.slice(before + 1);
       for (const m of added) await opts.session.appendMessage(m);
       messages = result.messages;
+      if (opts.config.mode === "plan") planText = result.text.trim();
       if (result.text?.trim() && !streamed) {
         process.stdout.write(result.text);
       }
       process.stdout.write("\n\n");
       for (const h of result.mcpHandles) await h.close().catch(() => {});
+      if (planText) await reviewPlan();
     } catch (err) {
       console.error("\nError:", err instanceof Error ? err.message : err);
     } finally {
@@ -112,10 +147,10 @@ export async function runRepl(opts: {
 
   if (opts.prompt) {
     await runTurn(opts.prompt);
+    rl.close();
     return;
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {
       const line = (await rl.question("\x1b[1myou>\x1b[0m ")).trim();

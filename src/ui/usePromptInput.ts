@@ -56,6 +56,7 @@ interface Options {
   onSubmit: (text: string) => void;
   onAbort: () => void;
   onToggleAgentMode: () => void;
+  allowModeToggle?: boolean;
   onPasteNotice?: (msg: string) => void;
   isActive?: boolean;
 }
@@ -206,7 +207,7 @@ export function usePromptInput(opts: Options) {
     }
     if (opts.busy) return;
 
-    if (key.shift && key.name === "tab") {
+    if (key.shift && key.name === "tab" && opts.allowModeToggle !== false) {
       opts.onToggleAgentMode();
       return;
     }
