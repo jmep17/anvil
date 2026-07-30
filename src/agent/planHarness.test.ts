@@ -17,6 +17,7 @@ describe("PlanHarness", () => {
 
     harness.setRoute({ kind: "research", goal: "Improve planning", successCriteria: ["Plans are structured"] });
     expect(harness.nextStep()?.stage).toBe("finding_evidence");
+    expect(harness.nextStep()?.activeTools).toEqual(["Grep"]);
 
     harness.recordEvidence("Grep", { pattern: "runAgent", path: "src" });
     expect(harness.nextStep()?.stage).toBe("reading_evidence");

@@ -20,6 +20,9 @@ export function createGlobTool(ctx: ToolContext) {
         nodir: true,
         dot: false,
         absolute: false,
+        // Apply these during traversal, not after it, so broad patterns do
+        // not spend most of their time walking installed dependencies or Git.
+        ignore: ["**/node_modules/**", "**/.git/**"],
       });
       const filtered = matches.filter((m) => !ig.ignores(m)).slice(0, 200);
       if (filtered.length === 0) return "No files matched.";

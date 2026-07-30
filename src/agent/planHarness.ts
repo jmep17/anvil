@@ -123,9 +123,9 @@ export class PlanHarness {
       case "finding_evidence":
         return {
           stage: "finding_evidence",
-          activeTools: ["Glob", "Grep"],
+          activeTools: ["Grep"],
           instruction:
-            "Find relevant repository evidence with Glob or Grep. Do not draft a plan yet.",
+            "Find relevant repository evidence with a targeted Grep. Do not draft a plan yet.",
         };
       case "reading_evidence":
         return {
