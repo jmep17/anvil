@@ -1,0 +1,6 @@
+#!/usr/bin/env bun
+/**
+ * Global entrypoint. Resolves to the package install location so Anvil
+ * can be invoked as `anvil` from any working directory.
+ */
+import "../src/cli.ts";

@@ -1,0 +1,42 @@
+{
+  "name": "anvil",
+  "version": "0.1.0",
+  "description": "Local Claude Code–like coding agent powered by LM Studio",
+  "module": "src/cli.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "anvil": "./bin/anvil"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "ANVIL.md",
+    "README.md"
+  ],
+  "scripts": {
+    "anvil": "bun run src/cli.ts",
+    "start": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "install:global": "bash ./install.sh",
+    "unlink:global": "rm -f \"$HOME/.local/bin/anvil\" && bun unlink || true"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/react": "^19.2.17",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.24",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.42",
+    "execa": "^10.0.0",
+    "glob": "^13.0.6",
+    "ignore": "^7.0.6",
+    "ink": "^7.1.1",
+    "react": "^19.2.8",
+    "zod": "^4.4.3"
+  }
+}

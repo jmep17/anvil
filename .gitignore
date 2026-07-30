@@ -1,0 +1,50 @@
+# Dependencies (bun install)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+out/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.class
+*.jar
+*.war
+*.ear
+*.wasm
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Lock (keep bun.lock)
+package-lock.json
+yarn.lock
+
+# Coverage
+coverage/
+.nyc_output/
