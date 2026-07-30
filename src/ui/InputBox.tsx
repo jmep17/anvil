@@ -97,7 +97,7 @@ function OptionList({
           <text
             key={index}
             fg={active ? accent : colors.muted}
-            attributes={active ? TextAttributes.BOLD : TextAttributes.DIM}
+            attributes={active ? TextAttributes.BOLD : TextAttributes.NONE}
           >
             {`${active ? "❯" : " "} ${index + 1}. ${option}`}
           </text>
@@ -215,17 +215,17 @@ export function InputBox({
       flexShrink={0}
     >
       {planReview === "denying" ? (
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        <text fg={colors.muted}>
           What should change? Enter sends the feedback.
         </text>
       ) : null}
       {editorMode === "vim" && vimMode === "normal" ? (
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        <text fg={colors.muted}>
           -- NORMAL --
         </text>
       ) : null}
       {pasteHint ? (
-        <text fg={colors.accent} attributes={TextAttributes.DIM}>
+        <text fg={colors.accent}>
           {pasteHint}
         </text>
       ) : null}
@@ -243,7 +243,7 @@ export function InputBox({
               <box key="placeholder" flexDirection="row">
                 <text fg={colors.accent}>{prefix}</text>
                 <text attributes={TextAttributes.INVERSE}>{" "}</text>
-                <text fg={colors.faint} attributes={TextAttributes.DIM}>
+                <text fg={colors.faint}>
                   {busy ? "" : " Ask Anvil to build, explain or fix something"}
                 </text>
               </box>

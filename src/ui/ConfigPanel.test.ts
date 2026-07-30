@@ -1,19 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { configVisibleRange } from "./ConfigPanel.tsx";
+import { CONFIG_FIELD_COUNT, configVisibleRange } from "./ConfigPanel.tsx";
 
 describe("configVisibleRange", () => {
   test("shows every field when the panel has room", () => {
-    const range = configVisibleRange(0, 12, 80);
+    const range = configVisibleRange(0, CONFIG_FIELD_COUNT + 5, 80);
 
     expect(range.start).toBe(0);
-    expect(range.end).toBe(7);
+    expect(range.end).toBe(CONFIG_FIELD_COUNT);
   });
 
   test("keeps the selected field visible in a short terminal", () => {
-    const range = configVisibleRange(6, 4, 80);
+    const last = CONFIG_FIELD_COUNT - 1;
+    const range = configVisibleRange(last, 4, 80);
 
     expect(range.start).toBeGreaterThan(0);
-    expect(range.end).toBe(7);
+    expect(range.end).toBe(CONFIG_FIELD_COUNT);
     expect(range.end - range.start).toBeGreaterThan(0);
   });
 

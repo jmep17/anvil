@@ -89,7 +89,7 @@ export const Footer = memo(function Footer({
       flexShrink={0}
       width="100%"
     >
-      <text fg={colors.faint} attributes={TextAttributes.DIM}>
+      <text fg={colors.faint}>
         {hint}
       </text>
       <box flexGrow={1} />
@@ -102,7 +102,6 @@ export const Footer = memo(function Footer({
                 ? colors.warning
                 : colors.faint
           }
-          attributes={TextAttributes.DIM}
         >
           {right}
         </text>

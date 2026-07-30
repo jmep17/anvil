@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { TextAttributes, type KeyEvent } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import type { AgentMode, AnvilConfig, EditorMode } from "../config/types.ts";
+import type {
+  AgentMode,
+  AnvilConfig,
+  EditorMode,
+  ThemePreference,
+} from "../config/types.ts";
 import {
   globalConfigPath,
   readJsonObject,
@@ -16,6 +21,7 @@ export type ConfigField =
   | "model"
   | "mode"
   | "editorMode"
+  | "theme"
   | "editor"
   | "contextLength"
   | "maxSteps"
@@ -25,11 +31,15 @@ const FIELDS: { id: ConfigField; label: string; kind: "text" | "toggle" | "numbe
   { id: "model", label: "Model", kind: "text" },
   { id: "mode", label: "Mode", kind: "toggle" },
   { id: "editorMode", label: "Editor mode", kind: "toggle" },
+  { id: "theme", label: "Theme", kind: "toggle" },
   { id: "editor", label: "External editor", kind: "text" },
   { id: "contextLength", label: "Context length", kind: "number" },
   { id: "maxSteps", label: "Max steps", kind: "number" },
   { id: "baseURL", label: "Base URL", kind: "text" },
 ];
+
+/** Exported so callers and tests track the field list instead of a magic number. */
+export const CONFIG_FIELD_COUNT = FIELDS.length;
 
 export function configVisibleRange(selected: number, maxRows: number, columns: number) {
   const contentWidth = Math.max(8, columns - 2);
@@ -66,6 +76,8 @@ function displayValue(config: AnvilConfig, id: ConfigField): string {
       return config.mode;
     case "editorMode":
       return config.ui.editorMode;
+    case "theme":
+      return config.ui.theme;
     case "editor":
       return config.ui.editor ?? "(env default)";
     case "contextLength":
@@ -81,6 +93,8 @@ function pathForField(id: ConfigField): string[] {
   switch (id) {
     case "editorMode":
       return ["ui", "editorMode"];
+    case "theme":
+      return ["ui", "theme"];
     case "editor":
       return ["ui", "editor"];
     default:
@@ -125,6 +139,9 @@ export function ConfigPanel({
       case "editorMode":
         value = next.ui.editorMode;
         break;
+      case "theme":
+        value = next.ui.theme;
+        break;
       case "editor":
         value = next.ui.editor ?? "";
         break;
@@ -158,6 +175,14 @@ export function ConfigPanel({
     if (field === "editorMode") {
       const editorMode: EditorMode = config.ui.editorMode === "vim" ? "emacs" : "vim";
       await persist({ ...config, ui: { ...config.ui, editorMode } }, field);
+      return;
+    }
+    if (field === "theme") {
+      // Cycles rather than toggles: auto is the useful default, and the
+      // explicit values are the escape hatch for terminals that stay silent.
+      const order: ThemePreference[] = ["auto", "dark", "light"];
+      const theme = order[(order.indexOf(config.ui.theme) + 1) % order.length]!;
+      await persist({ ...config, ui: { ...config.ui, theme } }, field);
     }
   };
 
@@ -250,7 +275,7 @@ export function ConfigPanel({
         {`CONFIGURATION  ${selected + 1}/${FIELDS.length}`}
       </text>
       {range.hintLines.map((line, index) => (
-        <text key={`hint-${index}`} fg={colors.muted} attributes={TextAttributes.DIM}>
+        <text key={`hint-${index}`} fg={colors.muted}>
           {line}
         </text>
       ))}

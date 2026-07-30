@@ -72,6 +72,7 @@ function mergeUi(base: UiConfig, partial: unknown): UiConfig {
   const p = partial as Record<string, unknown>;
   const next: UiConfig = { ...base };
   if (p.editorMode === "emacs" || p.editorMode === "vim") next.editorMode = p.editorMode;
+  if (p.theme === "auto" || p.theme === "dark" || p.theme === "light") next.theme = p.theme;
   if (typeof p.editor === "string") {
     next.editor = p.editor.trim() ? p.editor : undefined;
   } else if ("editor" in p && (p.editor === null || p.editor === undefined)) {

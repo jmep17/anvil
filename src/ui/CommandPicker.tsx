@@ -33,7 +33,7 @@ export function CommandPicker({
             key={command.name}
             fg={active ? colors.selectionFg : colors.muted}
             bg={active ? colors.selectionBg : undefined}
-            attributes={active ? TextAttributes.BOLD : TextAttributes.DIM}
+            attributes={active ? TextAttributes.BOLD : TextAttributes.NONE}
           >
             {`${active ? "› " : "  "}${line.slice(0, width - 2)}`}
           </text>

@@ -28,17 +28,17 @@ export const Welcome = memo(function Welcome({
       <text fg={colors.accent} attributes={TextAttributes.BOLD}>
         ✻ Welcome to Anvil
       </text>
-      <text fg={colors.muted} attributes={TextAttributes.DIM}>
+      <text fg={colors.muted}>
         {"  /help for commands · @ to reference a file · shift+tab for plan mode"}
       </text>
-      <text fg={colors.faint} attributes={TextAttributes.DIM}>
+      <text fg={colors.faint}>
         {`  cwd: ${cwd}`}
       </text>
-      <text fg={colors.faint} attributes={TextAttributes.DIM}>
+      <text fg={colors.faint}>
         {`  model: ${model}`}
       </text>
       {resumed ? (
-        <text fg={colors.faint} attributes={TextAttributes.DIM}>
+        <text fg={colors.faint}>
           {`  resumed ${resumed} message${resumed === 1 ? "" : "s"} from a previous session`}
         </text>
       ) : null}

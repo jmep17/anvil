@@ -22,7 +22,7 @@ export function FilePicker({
         paddingX={1}
         flexShrink={0}
       >
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        <text fg={colors.muted}>
           {`@${query || "…"} · no matching files`}
         </text>
       </box>
@@ -39,7 +39,7 @@ export function FilePicker({
       paddingX={1}
       flexShrink={0}
     >
-      <text fg={colors.muted} attributes={TextAttributes.DIM}>
+      <text fg={colors.muted}>
         {`@${query || "…"} · ${matches.length} file${matches.length === 1 ? "" : "s"}`}
       </text>
       {matches.map((path, index) => {

@@ -93,11 +93,11 @@ const Thinking = memo(function Thinking({ text, width }: { text: string; width: 
   const lines = wrapDisplayLines(text, Math.max(12, width - 2));
   return (
     <box flexDirection="column" width="100%" flexShrink={0}>
-      <text fg={colors.muted} attributes={TextAttributes.DIM | TextAttributes.ITALIC}>
+      <text fg={colors.muted} attributes={TextAttributes.ITALIC}>
         {`${THINKING} Thinking…`}
       </text>
       {lines.map((line, index) => (
-        <text key={index} fg={colors.faint} attributes={TextAttributes.DIM | TextAttributes.ITALIC}>
+        <text key={index} fg={colors.faint} attributes={TextAttributes.ITALIC}>
           {`  ${line || " "}`}
         </text>
       ))}
@@ -133,7 +133,7 @@ const Todos = memo(function Todos({
           <text
             key={`${todo.id}-${lineIndex}`}
             fg={done ? colors.faint : todo.status === "in_progress" ? colors.accent : colors.muted}
-            attributes={done ? TextAttributes.DIM | TextAttributes.STRIKETHROUGH : TextAttributes.NONE}
+            attributes={done ? TextAttributes.STRIKETHROUGH : TextAttributes.NONE}
           >
             {`${lineIndex === 0 ? prefix : `${RESULT_INDENT}  `}${lineIndex === 0 ? `${mark} ` : ""}${line}`}
           </text>
@@ -179,22 +179,22 @@ const ToolRow = memo(function ToolRow({
           {title}
         </text>
         {duration ? (
-          <text fg={colors.faint} attributes={TextAttributes.DIM}>{`  ${duration}`}</text>
+          <text fg={colors.faint}>{`  ${duration}`}</text>
         ) : null}
       </box>
 
       {!expanded ? (
-        <text fg={colors.muted} attributes={TextAttributes.DIM}>
+        <text fg={colors.muted}>
           {`  ${CORNER}  ${summary}${item.output ? "  (ctrl+o to expand)" : ""}`}
         </text>
       ) : (
         <>
-          <text fg={colors.muted} attributes={TextAttributes.DIM}>
+          <text fg={colors.muted}>
             {`  ${CORNER}  ${item.name} input`}
           </text>
           {wrapDisplayLines(formatToolInput(item.input), Math.max(12, width - 8)).map(
             (line, index) => (
-              <text key={`in-${index}`} fg={colors.faint} attributes={TextAttributes.DIM}>
+              <text key={`in-${index}`} fg={colors.faint}>
                 {`${RESULT_INDENT}${line || " "}`}
               </text>
             ),
@@ -235,7 +235,7 @@ const StatusRow = memo(function StatusRow({ text, width }: { text: string; width
   return (
     <box flexDirection="column" width="100%" flexShrink={0}>
       {wrapDisplayLines(text, Math.max(12, width - 4)).map((line, index) => (
-        <text key={index} fg={colors.faint} attributes={TextAttributes.DIM}>
+        <text key={index} fg={colors.faint}>
           {`  ${index === 0 ? "· " : "  "}${line}`}
         </text>
       ))}

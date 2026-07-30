@@ -36,7 +36,12 @@ import { Welcome, welcomeHeight } from "./Welcome.tsx";
 import { Working, workingHeight } from "./Working.tsx";
 import { nextId, syncNextId, type TimelineItem } from "./types.ts";
 import { expandFileMentions } from "./fileMentions.ts";
-import { colors } from "./theme.ts";
+import {
+  applyPalette,
+  buildPalette,
+  resolveBackground,
+  type ThemeMode,
+} from "./theme.ts";
 import { usePromptInput } from "./usePromptInput.ts";
 import { keyChar } from "./keys.ts";
 
@@ -759,6 +764,31 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
   );
 }
 
+/**
+ * Ask the terminal what it is actually drawing on. Terminals that do not
+ * answer the OSC query leave the palette on its configured default, so this
+ * never blocks startup for more than the timeout.
+ */
+async function detectBackground(
+  renderer: Awaited<ReturnType<typeof createCliRenderer>>,
+  preference: AnvilConfig["ui"]["theme"],
+): Promise<string> {
+  if (preference !== "auto") return resolveBackground(preference, {});
+
+  let background: string | null = null;
+  try {
+    const palette = await renderer.getPalette({ timeout: 250 });
+    background = palette.defaultBackground;
+  } catch {
+    // Terminal did not answer; fall back to the reported theme mode.
+  }
+  let mode: ThemeMode | null = renderer.themeMode;
+  if (!background && !mode) {
+    mode = await renderer.waitForThemeMode(250).catch(() => null);
+  }
+  return resolveBackground("auto", { background, mode });
+}
+
 export async function runTui(opts: {
   config: AnvilConfig;
   cwd: string;
@@ -771,10 +801,17 @@ export async function runTui(opts: {
     try {
       const renderer = await createCliRenderer({
         screenMode: "alternate-screen",
-        exitOnCtrlC: true,
+        // Ctrl+C is handled in-app so the first press interrupts rather than
+        // taking the session down with it.
+        exitOnCtrlC: false,
         useMouse: true,
         onDestroy: () => resolve(),
       });
+
+      // Tune the palette before the first frame: colours are read at render
+      // time, so this must land ahead of it.
+      applyPalette(buildPalette(await detectBackground(renderer, opts.config.ui.theme)));
+
       const root = createRoot(renderer);
       root.render(
         createElement(App, {

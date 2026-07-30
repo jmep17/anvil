@@ -56,6 +56,20 @@ Esc (or Ctrl+C) interrupts a running turn in the TUI, killing any command it spa
 The interactive TUI uses the terminal alternate screen (fullscreen) and inherits your
 terminal's background rather than painting its own.
 
+### Colours
+
+Anvil does not assume a dark terminal. At startup it asks the terminal for its actual
+background colour and tunes every palette role until it clears a minimum contrast
+ratio against it — WCAG AAA (7:1) for body text, AA (4.5:1) for anything carrying
+meaning, less for rules and separators that should recede. Hue and saturation are
+preserved, so the palette keeps its character on either theme.
+
+If your terminal doesn't answer the query, set it explicitly:
+
+```bash
+anvil config set ui.theme dark     # or light, or auto (default)
+```
+
 ### Slash commands
 
 Enter `/` to open a completion menu. The same commands work in the TUI and the REPL.
@@ -108,6 +122,7 @@ anvil config                          # effective values + which file won
 anvil config set model qwen/qwen3.6-27b
 anvil config set ui.editorMode vim
 anvil config set ui.editor nvim
+anvil config set ui.theme auto        # auto | dark | light
 anvil config set contextLength 65536
 anvil config unset model --project    # stop a repo from overriding global
 anvil config edit                     # open global config in $EDITOR
@@ -125,7 +140,8 @@ Example `~/.anvil/config.json`:
   "maxSteps": 40,
   "ui": {
     "editorMode": "emacs",
-    "editor": "nvim"
+    "editor": "nvim",
+    "theme": "auto"
   },
   "skills": {
     "autoDetect": true,

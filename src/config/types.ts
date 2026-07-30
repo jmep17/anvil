@@ -35,11 +35,20 @@ export interface ContextConfig {
 
 export type EditorMode = "emacs" | "vim";
 
+/**
+ * "auto" measures the terminal's own background and tunes the palette for
+ * contrast against it; the explicit values force one or the other for
+ * terminals that do not answer the query.
+ */
+export type ThemePreference = "auto" | "dark" | "light";
+
 export interface UiConfig {
   /** Input editing style. Default emacs. */
   editorMode: EditorMode;
   /** Override for external editor ($VISUAL / $EDITOR fallback). */
   editor?: string;
+  /** Palette tuning. Default auto. */
+  theme: ThemePreference;
 }
 
 export interface AnvilConfig {
@@ -72,6 +81,7 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 
 export const DEFAULT_UI_CONFIG: UiConfig = {
   editorMode: "emacs",
+  theme: "auto",
 };
 
 export const DEFAULT_CONFIG: AnvilConfig = {

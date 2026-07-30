@@ -123,6 +123,10 @@ export function coerceConfigValue(keyPath: string[], raw: string): unknown {
     throw new Error("ui.editorMode must be emacs or vim");
   }
 
+  if (leaf === "theme" && raw !== "auto" && raw !== "dark" && raw !== "light") {
+    throw new Error("ui.theme must be auto, dark or light");
+  }
+
   return raw;
 }
 
