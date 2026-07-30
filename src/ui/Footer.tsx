@@ -27,7 +27,7 @@ export function Footer({
   }
 
   return (
-    <Box paddingX={1}>
+    <Box paddingX={1} flexShrink={0}>
       <Text dimColor>{hint}</Text>
     </Box>
   );

@@ -4,14 +4,23 @@ import { ToolRow } from "./ToolRow.tsx";
 import type { TimelineItem } from "./types.ts";
 import { truncateDisplay } from "./format.ts";
 
+/** Collapse blank lines and cap height for dense assistant display. */
+function densifyAssistant(text: string, maxLines = 4, maxChars = 400): string {
+  const clipped = text.length > maxChars ? text.slice(-maxChars) : text;
+  const lines = clipped
+    .replace(/\n{2,}/g, "\n")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  return lines.slice(-maxLines).join("\n") || clipped.trim();
+}
+
 function estimateLines(item: TimelineItem): number {
-  if (item.kind === "tool") {
-    return item.status !== "running" && item.output ? 2 : 1;
+  if (item.kind === "tool") return 1;
+  if (item.kind === "assistant") {
+    return Math.min(4, Math.max(1, densifyAssistant(item.text).split("\n").length));
   }
-  if (item.kind === "user" || item.kind === "assistant" || item.kind === "thinking") {
-    const lines = item.text.split("\n").length;
-    return Math.min(Math.max(lines, 1), 6);
-  }
+  // user, thinking, status, error — always one display line
   return 1;
 }
 
@@ -39,7 +48,7 @@ function ItemView({ item }: { item: TimelineItem }) {
         </Text>
       );
     case "assistant":
-      return <Text>{item.text.length > 400 ? `${item.text.slice(-400)}` : item.text}</Text>;
+      return <Text>{densifyAssistant(item.text)}</Text>;
     case "thinking":
       return (
         <Text dimColor italic>
@@ -64,9 +73,17 @@ export function Timeline({
 }) {
   const visible = takeFit(items, maxLines);
   return (
-    <Box flexDirection="column" height={Math.max(maxLines, 1)} overflow="hidden">
+    <Box
+      flexDirection="column"
+      height={Math.max(maxLines, 1)}
+      overflow="hidden"
+      justifyContent="flex-end"
+      flexGrow={1}
+    >
       {visible.map((item) => (
-        <ItemView key={item.id} item={item} />
+        <Box key={item.id} flexShrink={0}>
+          <ItemView item={item} />
+        </Box>
       ))}
     </Box>
   );

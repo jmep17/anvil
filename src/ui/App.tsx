@@ -8,7 +8,7 @@ import type { AgentMode, AnvilConfig } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import type { AgentEvent, PermissionDecision } from "../tools/index.ts";
 import { allowAll } from "../tools/permissions.ts";
-import { Activity } from "./Activity.tsx";
+import { ACTIVITY_RESERVE, Activity } from "./Activity.tsx";
 import { ConfigPanel } from "./ConfigPanel.tsx";
 import { Footer } from "./Footer.tsx";
 import { Header } from "./Header.tsx";
@@ -271,15 +271,6 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     }
   });
 
-  const inputLines = Math.max(1, prompt.buffer.value.split("\n").length);
-  const activityBudget =
-    (busy ? 1 : 0) +
-    (thinking ? 1 : 0) +
-    (streaming ? Math.min(4, Math.ceil(streaming.length / 80)) : 0) +
-    items.filter((i) => i.kind === "tool" && i.status === "running").length;
-  const chrome = 3 + 1 + Math.min(inputLines + 2, 8) + Math.min(activityBudget, 6) + 2;
-  const timelineLines = Math.max(4, (rows || 24) - chrome);
-
   const runningTools = items.filter(
     (i): i is Extract<TimelineItem, { kind: "tool" }> =>
       i.kind === "tool" && i.status === "running",
@@ -288,10 +279,24 @@ export function App({ config: initialConfig, cwd, session, yes, initialPrompt }:
     (i) => !(i.kind === "tool" && i.status === "running"),
   );
 
+  const inputLines = Math.max(1, prompt.buffer.value.split("\n").length);
+  const vimExtra = config.ui.editorMode === "vim" ? 1 : 0;
+  const pasteExtra = prompt.pasteHint ? 1 : 0;
+  // Header 3 + mid margins 2 + input (borders+content) + reserved activity + footer 1
+  const inputContent = pendingPermission
+    ? 2
+    : Math.min(inputLines, 6) + vimExtra + pasteExtra;
+  const inputRows = inputContent + 2;
+  const activityActive =
+    busy || Boolean(thinking) || Boolean(streaming) || runningTools.length > 0;
+  const activityRows = activityActive ? ACTIVITY_RESERVE : 0;
+  const chrome = 3 + 2 + inputRows + activityRows + 1;
+  const timelineLines = Math.max(4, (rows || 24) - chrome);
+
   return (
     <Box flexDirection="column" width="100%" height={rows || undefined}>
-      <Header status={status} busy={busy} />
-      <Box flexGrow={1} flexDirection="column" marginY={1}>
+      <Header status={status} />
+      <Box flexGrow={1} flexDirection="column" marginY={1} overflow="hidden">
         <Timeline items={timelineItems} maxLines={timelineLines} />
         <Activity
           busy={busy}

@@ -1,6 +1,5 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { Spinner } from "./Spinner.tsx";
 import type { VimMode } from "./usePromptInput.ts";
 
 export function InputBox({
@@ -22,7 +21,13 @@ export function InputBox({
 }) {
   if (pending) {
     return (
-      <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
+      <Box
+        borderStyle="round"
+        borderColor="yellow"
+        paddingX={1}
+        flexDirection="column"
+        flexShrink={0}
+      >
         <Text color="yellow">
           Allow {pending.toolName}? {pending.detail.slice(0, 80)}
         </Text>
@@ -51,25 +56,20 @@ export function InputBox({
   }
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      {editorMode === "vim" && !busy ? (
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+      flexShrink={0}
+    >
+      {editorMode === "vim" ? (
         <Text dimColor>{vimMode === "normal" ? "-- NORMAL --" : "-- INSERT --"}</Text>
       ) : null}
       {pasteHint ? <Text color="cyan">{pasteHint}</Text> : null}
       {lines.map((line, i) => {
         const prefix =
-          i === 0 ? (
-            busy ? (
-              <>
-                <Spinner color="green" />
-                <Text color="green"> </Text>
-              </>
-            ) : (
-              <Text color="green">› </Text>
-            )
-          ) : (
-            <Text>  </Text>
-          );
+          i === 0 ? <Text color="green">› </Text> : <Text>  </Text>;
 
         if (busy || i !== cursorLine) {
           return (

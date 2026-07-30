@@ -12,7 +12,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
 
   if (item.status === "running") {
     return (
-      <Box>
+      <Box flexShrink={0}>
         <Spinner color="yellow" />
         <Text color="yellow"> {item.name}</Text>
         {summary ? <Text dimColor> {summary}</Text> : null}
@@ -21,20 +21,14 @@ export function ToolRow({ item }: { item: ToolItem }) {
   }
 
   const ok = item.status === "done";
-  const out = item.output ? truncateDisplay(item.output, 100) : "";
+  const out = item.output ? truncateDisplay(item.output, 60) : "";
   return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color={ok ? "green" : "red"}>{ok ? "✓" : "✗"}</Text>
-        <Text color="yellow"> {item.name}</Text>
-        {summary ? <Text dimColor> {summary}</Text> : null}
-        {dur ? <Text dimColor> · {dur}</Text> : null}
-      </Box>
-      {out ? (
-        <Box marginLeft={2}>
-          <Text dimColor>{out}</Text>
-        </Box>
-      ) : null}
+    <Box flexShrink={0}>
+      <Text color={ok ? "green" : "red"}>{ok ? "✓" : "✗"}</Text>
+      <Text color="yellow"> {item.name}</Text>
+      {summary ? <Text dimColor> {summary}</Text> : null}
+      {dur ? <Text dimColor> · {dur}</Text> : null}
+      {out ? <Text dimColor> → {out}</Text> : null}
     </Box>
   );
 }

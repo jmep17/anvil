@@ -202,6 +202,7 @@ export function ConfigPanel({
       borderColor="cyan"
       paddingX={1}
       width="100%"
+      flexShrink={0}
     >
       <Text bold color="cyan">
         /config
