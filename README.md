@@ -81,7 +81,13 @@ to the terminal's own scrollback and only the prompt and status line are pinned 
 reserved region at the bottom. Output starts where your shell prompt was and grows
 downward, your terminal's own scrolling and selection work throughout, and the
 transcript is still there after you quit. Anvil inherits your terminal's background
-rather than painting its own.
+rather than painting its own, and does not capture the mouse — the wheel, Page Up
+and drag-to-select stay with the terminal, which is where the transcript lives.
+
+Resizing or zooming redraws the transcript at the new size. Committed rows are the
+terminal's once written, so a resize would otherwise leave them re-wrapped at the
+wrong width with the pinned region duplicated below itself; Anvil replays its
+scrollback instead, which clears the terminal's saved lines in the process.
 
 ### Date and time
 

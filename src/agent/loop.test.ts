@@ -72,6 +72,10 @@ describe("a silent model server", () => {
       // Well inside the wait a user would otherwise be subjected to.
       expect(Date.now() - startedAt).toBeLessThan(15_000);
       expect(errors.join("\n")).toContain("waiting for the model to start responding");
+      // That it reports *once* rather than once per poll is covered by
+      // `StallWatch` in watchdog.test.ts, where the polling can be driven
+      // directly instead of raced against a socket unwinding.
+      expect(errors.filter((message) => message.includes("went quiet"))).toHaveLength(1);
     } finally {
       server.stop(true);
       await rm(cwd, { recursive: true, force: true });

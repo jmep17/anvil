@@ -194,3 +194,41 @@ describe("committed transcript", () => {
     }
   });
 });
+
+/**
+ * Committed rows are pre-wrapped and become the terminal's, so a resize leaves
+ * them wrapped for the wrong width — that is what makes zooming look broken.
+ * The fix is to redraw the transcript at the new width, which is only worth
+ * anything if a redraw actually fits the width it is handed.
+ */
+describe("redrawing at a different width", () => {
+  const busy: TimelineItem[] = [
+    { kind: "user", id: "u1", text: "explain how the retry backoff works and why it doubles" },
+    {
+      kind: "tool",
+      id: "t1",
+      name: "Read",
+      input: { file_path: "src/agent/loop.ts" },
+      status: "done",
+      output: "a\nb\nc",
+      ms: 1_400,
+    },
+    { kind: "error", id: "e1", text: "Cannot reach http://localhost:1234/v1 — connection refused" },
+  ];
+
+  for (const width of [50, 76, 120]) {
+    test(`fits inside ${width} columns`, async () => {
+      for (const row of (await transcript(busy, width)).split("\n")) {
+        expect([...row.trimEnd()].length).toBeLessThanOrEqual(width);
+      }
+    });
+  }
+
+  test("wraps to what it is given, not to a fixed width", () => {
+    const long = { kind: "user" as const, id: "u", text: "word ".repeat(60).trim() };
+    expect(itemLines(long, 40).length).toBeGreaterThan(itemLines(long, 120).length);
+    for (const line of itemLines(long, 40)) {
+      expect(line.text.length).toBeLessThanOrEqual(40);
+    }
+  });
+});

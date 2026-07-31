@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TimeoutConfig } from "../config/types.ts";
-import { StallDetector, formatStallDuration, stallMessage } from "./watchdog.ts";
+import { StallDetector, StallWatch, formatStallDuration, stallMessage } from "./watchdog.ts";
 
 const BUDGET: TimeoutConfig = { firstChunkMs: 1_000, chunkMs: 100, toolMs: 500 };
 
@@ -42,6 +42,49 @@ describe("StallDetector", () => {
       stall.beat(at, "chunk");
       expect(stall.overdue(at)).toBeNull();
     }
+  });
+});
+
+describe("StallWatch", () => {
+  test("reports a stall exactly once, however long it is polled after", () => {
+    const watch = new StallWatch(new StallDetector(BUDGET, 0));
+
+    expect(watch.tick(500)).toBeNull();
+    expect(watch.tick(1_500)).toEqual({ phase: "first-chunk", idleMs: 1_500 });
+
+    // The detector keeps failing its check while the aborted stream unwinds.
+    // Every one of these used to put another error into the transcript.
+    for (let at = 2_000; at < 60_000; at += 1_000) {
+      expect(watch.tick(at)).toBeNull();
+    }
+    expect(watch.report).toEqual({ phase: "first-chunk", idleMs: 1_500 });
+  });
+
+  test("never fires while an approval prompt is waiting on the user", () => {
+    let awaitingUser = true;
+    const watch = new StallWatch(new StallDetector(BUDGET, 0), () => awaitingUser);
+
+    // Someone reading a diff for ten minutes is not a stalled server, and
+    // timing out on them would answer the prompt on their behalf.
+    for (let at = 1_000; at <= 600_000; at += 1_000) {
+      expect(watch.tick(at)).toBeNull();
+    }
+
+    // And the clock starts from when they answered, not from when it was asked.
+    awaitingUser = false;
+    expect(watch.tick(600_500)).toBeNull();
+    expect(watch.tick(601_500)).not.toBeNull();
+  });
+
+  test("reports nothing while the model is answering", () => {
+    const detector = new StallDetector(BUDGET, 0);
+    const watch = new StallWatch(detector);
+
+    for (let at = 0; at <= 10_000; at += 50) {
+      detector.beat(at, "chunk");
+      expect(watch.tick(at)).toBeNull();
+    }
+    expect(watch.report).toBeNull();
   });
 });
 

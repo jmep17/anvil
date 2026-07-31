@@ -68,6 +68,48 @@ export class StallDetector {
   }
 }
 
+export interface StallReport {
+  phase: StallPhase;
+  idleMs: number;
+}
+
+/**
+ * Polls a `StallDetector` and reports at most one stall.
+ *
+ * The "at most one" is the whole point. The detector keeps failing its check for
+ * as long as the aborted stream takes to unwind — which, for the connection that
+ * caused the stall, can be a long time. Reporting every poll buried the
+ * transcript under one error per second and left the UI unusable.
+ */
+export class StallWatch {
+  private reported: StallReport | null = null;
+
+  constructor(
+    private readonly detector: StallDetector,
+    private readonly awaitingUser: () => boolean = () => false,
+  ) {}
+
+  /** The stall this run gave up on, or null if it has not. */
+  get report(): StallReport | null {
+    return this.reported;
+  }
+
+  /** The stall, the first time one is seen; null on every other call. */
+  tick(at: number): StallReport | null {
+    if (this.reported) return null;
+    // A turn waiting on an approval prompt is not a turn that has stalled, and
+    // timing out on it would answer the prompt for the user.
+    if (this.awaitingUser()) {
+      this.detector.beat(at);
+      return null;
+    }
+    const idleMs = this.detector.overdue(at);
+    if (idleMs == null) return null;
+    this.reported = { phase: this.detector.phase, idleMs };
+    return this.reported;
+  }
+}
+
 export function formatStallDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;

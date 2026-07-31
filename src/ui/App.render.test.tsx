@@ -6,6 +6,7 @@ import { testRender } from "@opentui/react/test-utils";
 import { DEFAULT_CONFIG, DEFAULT_CONTEXT_CONFIG, DEFAULT_SKILLS_CONFIG, DEFAULT_UI_CONFIG } from "../config/types.ts";
 import { SessionStore } from "../session/store.ts";
 import { App } from "./App.tsx";
+import { RESIZE_REPLAY_DEBOUNCE_MS } from "./resizeReplay.ts";
 
 const originalHome = process.env.HOME;
 let home = "";
@@ -151,6 +152,40 @@ describe("App", () => {
       renderer.destroy();
     }
   });
+
+  /**
+   * The replay itself cannot be asserted here: `createTestRenderer` never calls
+   * `setupTerminal()`, so `resetSplitFooterForReplay` throws under the harness
+   * ("requires an active terminal"). What this covers is the guard around it —
+   * a resize must not take the session down, and the pinned region must survive
+   * being narrowed.
+   */
+  test("resizing the terminal does not break the pinned region", async () => {
+    const session = await SessionStore.create(cwd);
+    const setup = await testRender(
+      <App config={config()} cwd={cwd} session={session} />,
+      SPLIT,
+    );
+    try {
+      await pollFrame(setup, (f) => f.includes("Ask Anvil"));
+
+      setup.resize(60, 18);
+      // Past the debounce, so the guarded replay really is attempted rather
+      // than still sitting on its timer when the test ends.
+      await Bun.sleep(RESIZE_REPLAY_DEBOUNCE_MS * 3);
+      const narrow = await pollFrame(setup, (f) => f.includes("Ask Anvil"));
+      for (const row of narrow.split("\n")) {
+        expect([...row.trimEnd()].length).toBeLessThanOrEqual(60);
+      }
+
+      setup.resize(120, 34);
+      expect(await pollFrame(setup, (f) => f.includes("? for shortcuts"))).toContain(
+        "test-model",
+      );
+    } finally {
+      setup.renderer.destroy();
+    }
+  }, 30_000);
 
   test("reasoning streams into the pinned region while the turn runs", async () => {
     const server = serveModel(["<think>", "weighing the options", " carefully"]);

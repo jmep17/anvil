@@ -3,6 +3,7 @@ import { createCliRenderer } from "@opentui/core";
 import {
   createRoot,
   useKeyboard,
+  useOnResize,
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/react";
@@ -33,6 +34,10 @@ import {
 } from "./InputBox.tsx";
 import { LiveOutput, liveOutputRows } from "./LiveOutput.tsx";
 import { appendPromptHistory, loadPromptHistory } from "./promptHistory.ts";
+import {
+  createResizeReplayScheduler,
+  type ResizeReplayScheduler,
+} from "./resizeReplay.ts";
 import { commitItem, commitItems, commitWelcome } from "./scrollback.ts";
 import { SessionPicker, sessionPickerRows } from "./SessionPicker.tsx";
 import { Working, workingHeight, type WorkingActivity } from "./Working.tsx";
@@ -74,7 +79,9 @@ export function App({
   // Stateful so /resume can swap the whole conversation without restarting.
   const [session, setSession] = useState(initialSession);
   const renderer = useRenderer();
-  const { width: columns, height: rows } = useTerminalDimensions();
+  // Width only: in split-footer mode this hook's `height` is the pinned
+  // region's, not the terminal's. `screenRows` below reads the real one.
+  const { width: columns } = useTerminalDimensions();
   const [config, setConfig] = useState(initialConfig);
   const configRef = useRef(config);
   configRef.current = config;
@@ -190,9 +197,15 @@ export function App({
   // Scrollback commits are async; this keeps them in the order they were made.
   const commitQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastCommittedRef = useRef<TimelineItem | undefined>(undefined);
+  // Everything ever committed, so the transcript can be redrawn at a new width.
+  // The session store is not a substitute: items pushed with `persist = false`
+  // — status lines, errors, /help — never reach it.
+  const transcriptRef = useRef<TimelineItem[]>([]);
+  const welcomeRef = useRef<{ cwd: string; model: string } | null>(null);
 
   const commit = useCallback(
     (item: TimelineItem) => {
+      transcriptRef.current.push(item);
       commitQueueRef.current = commitQueueRef.current
         .then(() => commitItem(renderer, item, lastCommittedRef.current, expandToolsRef.current))
         .then(() => {
@@ -206,6 +219,7 @@ export function App({
   /** Re-emit a stored transcript into scrollback, in order. */
   const replayTranscript = useCallback(
     (transcript: TimelineItem[]) => {
+      transcriptRef.current.push(...transcript);
       commitQueueRef.current = commitQueueRef.current
         .then(async () => {
           await commitItems(renderer, transcript, lastCommittedRef.current);
@@ -214,6 +228,56 @@ export function App({
         .catch(() => {});
     },
     [renderer],
+  );
+
+  /**
+   * Redraw the whole transcript at the terminal's new width.
+   *
+   * Committed scrollback rows are pre-wrapped and belong to the terminal, so a
+   * resize leaves them re-wrapped at arbitrary columns — borders split, hanging
+   * indents lost. OpenTUI's documented answer for an application that can
+   * reconstruct its own scrollback is a destructive resize replay: reset the
+   * split-footer bookkeeping, drop the mangled copy, and write it again.
+   */
+  const replayForResize = useCallback(() => {
+    commitQueueRef.current = commitQueueRef.current
+      .then(async () => {
+        try {
+          // Throws unless split-footer + capture-stdout with a live terminal —
+          // not the case while suspended for $EDITOR, or under a test renderer.
+          renderer.resetSplitFooterForReplay({ clearSavedLines: true });
+        } catch {
+          // Leaving the scrollback as it is beats taking the session down.
+          return;
+        }
+        // Spacing is relative to what precedes an item, so it starts over too.
+        lastCommittedRef.current = undefined;
+        if (welcomeRef.current) commitWelcome(renderer, welcomeRef.current);
+        const items = transcriptRef.current;
+        await commitItems(renderer, items);
+        lastCommittedRef.current = items.at(-1);
+      })
+      .catch(() => {});
+  }, [renderer]);
+
+  const replayRef = useRef(replayForResize);
+  replayRef.current = replayForResize;
+  const resizeReplayRef = useRef<ResizeReplayScheduler | null>(null);
+  if (resizeReplayRef.current === null) {
+    resizeReplayRef.current = createResizeReplayScheduler({
+      initialSize: { width: renderer.terminalWidth, height: renderer.terminalHeight },
+      replay: () => replayRef.current(),
+    });
+  }
+  useEffect(() => () => resizeReplayRef.current?.cancel(), []);
+  // Read from the terminal, not from the event: in split-footer mode the
+  // reported height is the pinned region's, and setting `renderer.footerHeight`
+  // raises a resize of its own every time a picker opens.
+  useOnResize(() =>
+    resizeReplayRef.current?.onResize({
+      width: renderer.terminalWidth,
+      height: renderer.terminalHeight,
+    }),
   );
 
   const recordTimeline = useCallback(
@@ -330,6 +394,13 @@ export function App({
     async (text: string, fromQueue = false) => {
       if (!text.trim()) return;
       const revisingPlan = planReview?.phase === "denying";
+
+      // Leaving is never queued. A turn that will not end would otherwise hold
+      // the only way out behind itself.
+      if (!revisingPlan && parseCommand(text)?.name === "exit") {
+        exit();
+        return;
+      }
 
       // A message typed while the agent is working waits its turn instead of
       // being dropped on the floor. It is shown now, in the order it was typed,
@@ -683,7 +754,8 @@ export function App({
 
   useEffect(() => {
     (async () => {
-      commitWelcome(renderer, { cwd, model: configRef.current.model });
+      welcomeRef.current = { cwd, model: configRef.current.model };
+      commitWelcome(renderer, welcomeRef.current);
       setPromptHistory(await loadPromptHistory(cwd));
       const loaded = await session.loadMessages();
       messagesRef.current = loaded;
@@ -779,12 +851,11 @@ export function App({
 
   useKeyboard((key) => {
     // Ctrl+C never exits on the first press: an accidental one mid-session
-    // used to take the whole transcript with it.
+    // used to take the whole transcript with it. It does always *arm* the exit
+    // though — a turn that will not abort must not be able to trap the session,
+    // so the second press leaves regardless of what the agent is doing.
     if (key.ctrl && key.name === "c") {
-      if (busy) {
-        abortRef.current?.abort();
-        return;
-      }
+      if (busy) abortRef.current?.abort();
       armExit();
       return;
     }
@@ -1042,7 +1113,11 @@ export async function runTui(opts: {
         // Ctrl+C is handled in-app so the first press interrupts rather than
         // taking the session down with it.
         exitOnCtrlC: false,
-        useMouse: true,
+        // Mouse tracking is deliberately off. Enabling it makes the terminal
+        // forward wheel events to us instead of scrolling its own buffer — and
+        // its buffer is where the transcript lives, so the wheel, Page Up and
+        // drag-to-select all stop working. Nothing here needs the mouse.
+        useMouse: false,
         onDestroy: () => resolve(),
       });
 

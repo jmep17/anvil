@@ -29,7 +29,7 @@ import {
 } from "./planHarness.ts";
 import { shouldPauseReadTool } from "./stall.ts";
 import { buildSystemPrompt } from "./system.ts";
-import { StallDetector, stallMessage, type StallPhase } from "./watchdog.ts";
+import { StallDetector, StallWatch, stallMessage, type StallPhase } from "./watchdog.ts";
 
 /** How often the silence detector is consulted. */
 const STALL_POLL_MS = 1_000;
@@ -168,16 +168,25 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   // on a server that has stopped answering.
   const abort = chainAbort(opts.abortSignal);
   const stall = new StallDetector(opts.config.timeouts, Date.now());
-  // Held in an object: a plain `let` assigned only inside a callback is
-  // narrowed to `never` by the time the catch below reads it.
-  const stalled: { hit: { phase: StallPhase; idleMs: number } | null } = { hit: null };
   const beat = (phase?: StallPhase) => stall.beat(Date.now(), phase);
+  // Approval prompts block the turn for as long as the user takes to read them.
+  // That is not a stall, and timing out on it would answer the prompt for them.
+  let awaitingUser = 0;
+  const watchdog = new StallWatch(stall, () => awaitingUser > 0);
 
   const ctx: ToolContext = {
     cwd: opts.cwd,
     mode: opts.config.mode,
     alwaysAllowed,
-    askPermission: opts.askPermission,
+    askPermission: async (toolName, detail) => {
+      awaitingUser += 1;
+      try {
+        return await opts.askPermission(toolName, detail);
+      } finally {
+        awaitingUser -= 1;
+        beat();
+      }
+    },
     abortSignal: abort.signal,
     maxOutputChars: toolOutputBudget(opts.config.contextLength),
     emit: opts.onEvent,
@@ -373,23 +382,33 @@ export async function runAgent(opts: RunAgentOptions): Promise<RunAgentResult> {
   });
 
   const watch = setInterval(() => {
-    const idleMs = stall.overdue(Date.now());
-    if (idleMs == null) return;
-    stalled.hit = { phase: stall.phase, idleMs };
-    opts.onEvent?.({ type: "error", message: stallMessage(stall.phase, idleMs) });
-    abort.abort(new Error(stallMessage(stall.phase, idleMs)));
+    const report = watchdog.tick(Date.now());
+    if (!report) return;
+    clearInterval(watch);
+    const message = stallMessage(report.phase, report.idleMs);
+    opts.onEvent?.({ type: "error", message });
+    abort.abort(new Error(message));
   }, STALL_POLL_MS);
+
+  /** The stall, if this run gave up on one — never the abort it caused. */
+  const stalledError = () => {
+    const report = watchdog.report;
+    return report ? new Error(stallMessage(report.phase, report.idleMs)) : null;
+  };
 
   let finalText: string;
   let responseMessages: ModelMessage[];
   try {
     finalText = await result.text;
     responseMessages = (await result.response).messages;
+    // An aborted stream can resolve rather than reject. Either way the turn
+    // failed, and the caller must not be handed a truncated answer as if it
+    // were the whole one.
+    const stalled = stalledError();
+    if (stalled) throw stalled;
   } catch (err) {
-    // Report the stall, not the abort it caused — "operation was aborted" reads
-    // as if the user had pressed Esc.
-    if (stalled.hit) throw new Error(stallMessage(stalled.hit.phase, stalled.hit.idleMs));
-    throw err;
+    // "operation was aborted" would read as if the user had pressed Esc.
+    throw stalledError() ?? err;
   } finally {
     clearInterval(watch);
   }

@@ -228,9 +228,12 @@ export async function commitItem(
   const id = `sb-${commitSeq++}`;
 
   if (!isMarkdown(item)) {
-    const lines = itemLines(item, renderer.width, expand);
-    if (lines.length === 0) return;
+    if (itemLines(item, renderer.width, expand).length === 0) return;
     renderer.writeToScrollback((ctx) => {
+      // Measured from the width being drawn into, not from the renderer: a
+      // resize between here and the commit would otherwise wrap the rows for
+      // one width inside a box built for another.
+      const lines = itemLines(item, ctx.width, expand);
       const root = new BoxRenderable(ctx.renderContext, {
         id,
         flexDirection: "column",
@@ -261,7 +264,9 @@ export async function commitItem(
     const root = new BoxRenderable(surface.renderContext, {
       id,
       flexDirection: "column",
-      width: renderer.width,
+      // The surface's own width, not the renderer's — they differ if the
+      // terminal is resized while this block is being laid out.
+      width: surface.width,
     });
     if (gap) {
       root.add(new TextRenderable(surface.renderContext, { id: `${id}-gap`, content: "" }));
@@ -272,7 +277,9 @@ export async function commitItem(
     const body = new BoxRenderable(surface.renderContext, {
       id: `${id}-body`,
       flexDirection: "column",
-      width: renderer.width,
+      // The surface's own width, not the renderer's — they differ if the
+      // terminal is resized while this block is being laid out.
+      width: surface.width,
       paddingLeft: 2,
     });
     body.add(
