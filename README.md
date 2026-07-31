@@ -172,7 +172,11 @@ exactly what will change before the action runs. Resumed TUI sessions restore th
 visual transcript when it is available; older sessions still retain their model
 conversation context.
 
-**Vim mode** (`ui.editorMode: "vim"` via `/config` or `anvil config set ui.editorMode vim`): Esc enters normal mode (`hjkl`, `i`/`a`/`I`/`A`, `x`, `dd`, `w`/`b`, `o`/`O`).
+**Vim mode** (`ui.editorMode: "vim"` via `/config` or `anvil config set ui.editorMode vim`): Esc enters normal mode (`hjkl`, `i`/`a`/`I`/`A`, `x`, `dd`, `yy`, `p`/`P`, `w`/`b`, `o`/`O`).
+
+`dd`, `yy` and `x` fill the unnamed register, and `p`/`P` put it back — linewise
+for `dd`/`yy` (a new line below or above), charwise for `x` (after or at the
+cursor), the way vim does.
 
 ## Config
 

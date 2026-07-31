@@ -4,11 +4,13 @@ import { useKeyboard, usePaste } from "@opentui/react";
 import type { EditorMode } from "../config/types.ts";
 import {
   backspace,
+  charAt,
   clearLine,
   createBuffer,
   del,
   deleteLine,
   insert,
+  lineAt,
   lineEnd,
   lineHome,
   moveDown,
@@ -18,6 +20,9 @@ import {
   normalizePaste,
   openLineAbove,
   openLineBelow,
+  putAfter,
+  putBefore,
+  type Register,
   type TextBuffer,
   wordBackward,
   wordForward,
@@ -130,7 +135,10 @@ export function usePromptInput(opts: Options) {
   const [history, setHistory] = useState(() => createHistory(opts.initialHistory));
   const historyRef = useRef(history);
   historyRef.current = history;
-  const pendingD = useRef(false);
+  /** The half-typed operator of a two-key normal-mode command: `d` or `y`. */
+  const pendingOp = useRef<"d" | "y" | null>(null);
+  /** Vim's unnamed register. Never rendered, so it is a ref, not state. */
+  const register = useRef<Register | null>(null);
   const editingRef = useRef(false);
   const filesRef = useRef<string[]>([]);
   const loadGen = useRef(0);
@@ -149,7 +157,7 @@ export function usePromptInput(opts: Options) {
   const resetBuffer = useCallback(() => {
     setBuffer(createBuffer(""));
     setVimMode("insert");
-    pendingD.current = false;
+    pendingOp.current = null;
     setFilePicker(null);
     setPickerDismissed(false);
     setCommandPicker(null);
@@ -369,7 +377,7 @@ export function usePromptInput(opts: Options) {
     if (key.name === "escape") {
       if (vim && vimMode === "insert") {
         setVimMode("normal");
-        pendingD.current = false;
+        pendingOp.current = null;
         return;
       }
       if (buffer.value) {
@@ -397,15 +405,20 @@ export function usePromptInput(opts: Options) {
     }
 
     if (vim && vimMode === "normal") {
-      if (pendingD.current) {
-        pendingD.current = false;
-        if (ch === "d") {
-          setBuffer((b) => deleteLine(b));
+      const op = pendingOp.current;
+      if (op) {
+        pendingOp.current = null;
+        // `dd` and `yy` take the same line; only one of them removes it.
+        if (ch === op) {
+          setBuffer((b) => {
+            register.current = { text: lineAt(b), linewise: true };
+            return op === "d" ? deleteLine(b) : b;
+          });
         }
         return;
       }
-      if (ch === "d") {
-        pendingD.current = true;
+      if (ch === "d" || ch === "y") {
+        pendingOp.current = ch;
         return;
       }
       if (ch === "h" || key.name === "left") {
@@ -441,7 +454,19 @@ export function usePromptInput(opts: Options) {
         return;
       }
       if (ch === "x") {
-        setBuffer((b) => del(b));
+        setBuffer((b) => {
+          const taken = charAt(b);
+          if (taken) register.current = { text: taken, linewise: false };
+          return del(b);
+        });
+        return;
+      }
+      if (ch === "p") {
+        setBuffer((b) => putAfter(b, register.current));
+        return;
+      }
+      if (ch === "P") {
+        setBuffer((b) => putBefore(b, register.current));
         return;
       }
       if (ch === "i") {

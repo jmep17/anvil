@@ -171,3 +171,32 @@ describe("approval prompt in limited space", () => {
     expect(frame).not.toContain("more diff line");
   });
 });
+
+/**
+ * A pasted object is reported as arriving "with an indent". The buffer itself
+ * is byte-identical to what was pasted — see the paste-fidelity tests in
+ * textBuffer.test.ts — so anything visible comes from the prompt's gutter:
+ * the first row is marked `> ` and every row after it is padded by two to line
+ * up underneath it. This pins down what that gutter does, since it is the only
+ * thing between the copied text and the screen.
+ */
+describe("a multi-line prompt's gutter", () => {
+  const object = '{\n  "name": "anvil",\n  "version": 1\n}';
+
+  test("keeps the block's own alignment rather than adding to it", async () => {
+    const frame = await frameFor(
+      <InputBox value={object} cursor={object.length} busy={false} columns={80} />,
+    );
+    // Rows between the box's top and bottom rules, in order. The border sits at
+    // a fixed column, so positions stay comparable across them.
+    const rows = frame.split("\n").filter((row) => row.includes("\u2502"));
+    const [open, name, , close] = rows;
+
+    expect(open).toContain("> {");
+    // The braces at the same depth still line up with each other...
+    expect(close!.indexOf("}")).toBe(open!.indexOf("{"));
+    // ...and the object's own two-space indent is still exactly two, so the
+    // gutter is aligning the block rather than shifting it.
+    expect(name!.indexOf('"name"') - open!.indexOf("{")).toBe(2);
+  });
+});

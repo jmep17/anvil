@@ -146,6 +146,74 @@ export function deleteLine(buf: TextBuffer): TextBuffer {
   return clearLine(buf);
 }
 
+/**
+ * A vim register. `linewise` is not decoration: it decides whether a put opens
+ * a new line or splices into the current one, and getting it wrong is the
+ * difference between `p` behaving like vim and behaving like a paste.
+ */
+export interface Register {
+  text: string;
+  linewise: boolean;
+}
+
+/** The current line with its trailing newline — what `yy` and `dd` take. */
+export function lineAt(buf: TextBuffer): string {
+  const { lineStart, lineEnd } = lineInfo(buf);
+  return `${buf.value.slice(lineStart, lineEnd)}\n`;
+}
+
+/** The character under the cursor — what `x` takes. Empty at end of buffer. */
+export function charAt(buf: TextBuffer): string {
+  return buf.value[buf.cursor] ?? "";
+}
+
+/** Split a register's text into whole lines, dropping the trailing empty. */
+function registerLines(register: Register): string {
+  return register.text.endsWith("\n") ? register.text : `${register.text}\n`;
+}
+
+/** `p` — linewise opens a line below, charwise inserts after the cursor. */
+export function putAfter(buf: TextBuffer, register: Register | null): TextBuffer {
+  if (!register?.text) return buf;
+  if (!register.linewise) {
+    // vim puts after the character the cursor sits on; at end of line there is
+    // no such character, so it lands where the cursor already is.
+    const at = Math.min(buf.value.length, buf.cursor + (charAt(buf) ? 1 : 0));
+    const value = buf.value.slice(0, at) + register.text + buf.value.slice(at);
+    return { value, cursor: at + register.text.length - 1, preferredCol: null };
+  }
+  const { lineEnd } = lineInfo(buf);
+  const text = registerLines(register);
+  // Splice in after this line's newline, adding one if the buffer lacks it.
+  const hasNewline = buf.value[lineEnd] === "\n";
+  const at = hasNewline ? lineEnd + 1 : lineEnd;
+  const inserted = hasNewline ? text : `\n${text.replace(/\n$/, "")}`;
+  const value = buf.value.slice(0, at) + inserted + buf.value.slice(at);
+  return {
+    value,
+    cursor: at + (hasNewline ? 0 : 1),
+    preferredCol: null,
+  };
+}
+
+/** `P` — linewise opens a line above, charwise inserts at the cursor. */
+export function putBefore(buf: TextBuffer, register: Register | null): TextBuffer {
+  if (!register?.text) return buf;
+  if (!register.linewise) {
+    const value =
+      buf.value.slice(0, buf.cursor) + register.text + buf.value.slice(buf.cursor);
+    return {
+      value,
+      cursor: buf.cursor + register.text.length - 1,
+      preferredCol: null,
+    };
+  }
+  const { lineStart } = lineInfo(buf);
+  const value =
+    buf.value.slice(0, lineStart) + registerLines(register) + buf.value.slice(lineStart);
+  return { value, cursor: lineStart, preferredCol: null };
+}
+
 export function wordForward(buf: TextBuffer): TextBuffer {
   let i = buf.cursor;
   const n = buf.value.length;
@@ -172,11 +240,21 @@ export function openLineAbove(buf: TextBuffer): TextBuffer {
   return { ...next, cursor: atHome.cursor };
 }
 
-/** Normalize paste: strip one trailing newline if the paste is otherwise single-line. */
+/**
+ * Tidy a paste for a prompt: drop leading blank lines, and one trailing newline
+ * if the paste is otherwise single-line.
+ *
+ * The leading newlines matter more than they look. Selecting whole lines in an
+ * editor usually starts the selection at the end of the line above, so the
+ * clipboard begins with `\n`. Pasted into the prompt that pushes the entire
+ * block down a row, and every row below the first carries the continuation
+ * gutter — which reads as the pasted text having been indented.
+ */
 export function normalizePaste(text: string): string {
-  if (!text.includes("\n")) return text;
-  if (text.endsWith("\n") && !text.slice(0, -1).includes("\n")) {
-    return text.slice(0, -1);
+  const body = text.replace(/^\n+/, "");
+  if (!body.includes("\n")) return body;
+  if (body.endsWith("\n") && !body.slice(0, -1).includes("\n")) {
+    return body.slice(0, -1);
   }
-  return text;
+  return body;
 }
